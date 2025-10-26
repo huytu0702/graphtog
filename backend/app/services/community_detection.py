@@ -164,9 +164,7 @@ class CommunityDetectionService:
             logger.error(f"Community detection failed: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    def _store_community_assignments(
-        self, session, results: List[Dict]
-    ) -> None:
+    def _store_community_assignments(self, session, results: List[Dict]) -> None:
         """
         Store community assignments in Neo4j
 
@@ -320,9 +318,7 @@ class CommunityDetectionService:
             LIMIT 1
             """
 
-            result = session.run(
-                query, {"source": source_entity, "target": target_entity}
-            ).single()
+            result = session.run(query, {"source": source_entity, "target": target_entity}).single()
 
             if result:
                 return {

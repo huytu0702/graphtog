@@ -48,10 +48,8 @@ class LLMService:
             except Exception as e:
                 if attempt == self.max_retries - 1:
                     raise
-                wait_time = self.retry_delay * (2 ** attempt)
-                logger.warning(
-                    f"Attempt {attempt + 1} failed, retrying in {wait_time}s: {e}"
-                )
+                wait_time = self.retry_delay * (2**attempt)
+                logger.warning(f"Attempt {attempt + 1} failed, retrying in {wait_time}s: {e}")
                 time.sleep(wait_time)
 
     @staticmethod
@@ -137,7 +135,9 @@ JSON:"""
                 "error": str(e),
             }
 
-    def extract_relationships(self, text: str, entities: List[Dict], chunk_id: str) -> Dict[str, Any]:
+    def extract_relationships(
+        self, text: str, entities: List[Dict], chunk_id: str
+    ) -> Dict[str, Any]:
         """
         Extract relationships between entities
 
@@ -196,9 +196,7 @@ JSON:"""
                 "error": str(e),
             }
 
-    async def batch_extract_entities(
-        self, chunks: List[Tuple[str, str]]
-    ) -> List[Dict[str, Any]]:
+    async def batch_extract_entities(self, chunks: List[Tuple[str, str]]) -> List[Dict[str, Any]]:
         """
         Batch extract entities from multiple chunks
 
@@ -298,9 +296,7 @@ JSON:"""
             Dict with generated answer
         """
         citations_text = (
-            f"\n\nCitations:\n" + "\n".join([f"- {c}" for c in citations])
-            if citations
-            else ""
+            f"\n\nCitations:\n" + "\n".join([f"- {c}" for c in citations]) if citations else ""
         )
 
         prompt = f"""Answer the following question based on the provided context.

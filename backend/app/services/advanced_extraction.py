@@ -68,8 +68,9 @@ Examples of relationship extraction:
         """
         try:
             entity_types_str = (
-                ", ".join(entity_types) if entity_types else
-                "PERSON, ORGANIZATION, LOCATION, CONCEPT, EVENT, PRODUCT, OTHER"
+                ", ".join(entity_types)
+                if entity_types
+                else "PERSON, ORGANIZATION, LOCATION, CONCEPT, EVENT, PRODUCT, OTHER"
             )
 
             prompt = f"""{self.few_shot_examples['entity']}
@@ -161,9 +162,7 @@ Only return valid JSON.
             logger.error(f"Coreference resolution failed: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    def extract_attributes(
-        self, entity_name: str, text: str
-    ) -> Dict[str, Any]:
+    def extract_attributes(self, entity_name: str, text: str) -> Dict[str, Any]:
         """
         Extract attributes and properties of an entity
 

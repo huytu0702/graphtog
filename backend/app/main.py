@@ -118,7 +118,16 @@ async def root():
     }
 
 
-from app.api.endpoints import auth, documents, queries, admin, communities, advanced_features, visualization, cache
+from app.api.endpoints import (
+    auth,
+    documents,
+    queries,
+    admin,
+    communities,
+    advanced_features,
+    visualization,
+    cache,
+)
 
 # Include API routes
 app.include_router(auth.router, prefix="/api/auth")

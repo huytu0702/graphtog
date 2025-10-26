@@ -44,9 +44,7 @@ class Settings:
     # ========== FILE UPLOAD CONFIG ==========
     MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "52428800"))  # 50MB
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")
-    ALLOWED_DOCUMENT_TYPES: list = os.getenv(
-        "ALLOWED_DOCUMENT_TYPES", "md"
-    ).split(",")
+    ALLOWED_DOCUMENT_TYPES: list = os.getenv("ALLOWED_DOCUMENT_TYPES", "md").split(",")
 
     # ========== LANGSMITH CONFIG ==========
     LANGSMITH_API_KEY: Optional[str] = os.getenv("LANGSMITH_API_KEY")

@@ -42,9 +42,7 @@ class CacheService:
 
         return self.redis_client
 
-    def set_cache(
-        self, key: str, value: Any, ttl: Optional[int] = None
-    ) -> bool:
+    def set_cache(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """
         Set value in cache
 
@@ -172,9 +170,7 @@ class CacheService:
         """Get cached query result"""
         return self.get_cache(f"query:{query_id}")
 
-    def cache_retrieval_result(
-        self, retrieval_id: str, result: Dict, ttl: int = 3600
-    ) -> bool:
+    def cache_retrieval_result(self, retrieval_id: str, result: Dict, ttl: int = 3600) -> bool:
         """Cache retrieval result"""
         return self.set_cache(f"retrieval:{retrieval_id}", result, ttl=ttl)
 

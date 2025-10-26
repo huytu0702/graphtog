@@ -27,9 +27,7 @@ class MultiLevelRetrievalService:
             self.session = get_neo4j_session()
         return self.session
 
-    def retrieve_local_context(
-        self, query_entity: str, hop_limit: int = 1
-    ) -> Dict[str, Any]:
+    def retrieve_local_context(self, query_entity: str, hop_limit: int = 1) -> Dict[str, Any]:
         """
         Retrieve local context around a query entity
 
@@ -128,9 +126,7 @@ class MultiLevelRetrievalService:
                 "community_size": len(result["community_members"]),
                 "members": result["community_members"][:20],
                 "summary": result["summary"] if include_summaries else None,
-                "themes": (
-                    result["themes"].split(",") if result["themes"] else []
-                ),
+                "themes": (result["themes"].split(",") if result["themes"] else []),
             }
 
         except Exception as e:
@@ -222,9 +218,7 @@ class MultiLevelRetrievalService:
             if "local" in retrieval_levels:
                 local_results = []
                 for entity in query_entities.get("entities", [])[:3]:
-                    local_result = self.retrieve_local_context(
-                        entity.get("name"), hop_limit=1
-                    )
+                    local_result = self.retrieve_local_context(entity.get("name"), hop_limit=1)
                     if local_result["status"] == "success":
                         local_results.append(local_result)
                 results["results"]["local"] = local_results
@@ -233,9 +227,7 @@ class MultiLevelRetrievalService:
             if "community" in retrieval_levels:
                 community_results = []
                 for entity in query_entities.get("entities", [])[:3]:
-                    community_result = self.retrieve_community_context(
-                        entity.get("name")
-                    )
+                    community_result = self.retrieve_community_context(entity.get("name"))
                     if community_result["status"] == "success":
                         community_results.append(community_result)
                 results["results"]["community"] = community_results
@@ -290,9 +282,7 @@ class MultiLevelRetrievalService:
             "communities": list(combined["communities"]),
         }
 
-    def adaptive_retrieval(
-        self, query: str, query_type: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def adaptive_retrieval(self, query: str, query_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Adaptively select retrieval strategy based on query type
 
@@ -307,9 +297,7 @@ class MultiLevelRetrievalService:
             # Classify query if not provided
             if not query_type:
                 classification = llm_service.classify_query(query)
-                query_type = classification.get(
-                    "query_type", "exploratory"
-                )
+                query_type = classification.get("query_type", "exploratory")
 
             # Select retrieval strategy based on query type
             if query_type == "specific":

@@ -166,7 +166,11 @@ class VisualizationService:
                         "label": f"Community {community['id']}",
                         "size": community["size"],
                         "summary": community.get("summary", "")[:100],
-                        "themes": community.get("themes", "").split(",") if community.get("themes") else [],
+                        "themes": (
+                            community.get("themes", "").split(",")
+                            if community.get("themes")
+                            else []
+                        ),
                     },
                     "classes": "community",
                     "style": {
@@ -243,25 +247,29 @@ class VisualizationService:
 
             # Document nodes
             for doc in documents:
-                nodes.append({
-                    "data": {
-                        "id": f"doc_{doc['id']}",
-                        "label": doc["label"] or f"Doc {doc['id']}",
-                        "type": "document",
-                    },
-                    "classes": "document",
-                })
+                nodes.append(
+                    {
+                        "data": {
+                            "id": f"doc_{doc['id']}",
+                            "label": doc["label"] or f"Doc {doc['id']}",
+                            "type": "document",
+                        },
+                        "classes": "document",
+                    }
+                )
 
             # Build edges
             edges = []
             for rel in doc_rels + tu_rels:
-                edges.append({
-                    "data": {
-                        "source": rel["source"],
-                        "target": rel["target"],
-                        "label": rel["type"],
+                edges.append(
+                    {
+                        "data": {
+                            "source": rel["source"],
+                            "target": rel["target"],
+                            "label": rel["type"],
+                        }
                     }
-                })
+                )
 
             return {
                 "status": "success",
@@ -274,9 +282,7 @@ class VisualizationService:
             logger.error(f"Failed to get hierarchical graph: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    def get_ego_graph(
-        self, entity_id: str, hop_limit: int = 2
-    ) -> Dict[str, Any]:
+    def get_ego_graph(self, entity_id: str, hop_limit: int = 2) -> Dict[str, Any]:
         """
         Get ego graph centered on a specific entity
 
@@ -328,37 +334,43 @@ class VisualizationService:
 
             # Build nodes
             nodes = []
-            nodes.append({
-                "data": {
-                    "id": central["id"],
-                    "label": central["label"],
-                    "type": central["type"],
-                },
-                "classes": "central-entity",
-            })
+            nodes.append(
+                {
+                    "data": {
+                        "id": central["id"],
+                        "label": central["label"],
+                        "type": central["type"],
+                    },
+                    "classes": "central-entity",
+                }
+            )
 
             for neighbor in neighbors:
-                nodes.append({
-                    "data": {
-                        "id": neighbor["id"],
-                        "label": neighbor["label"],
-                        "type": neighbor["type"],
-                        "distance": neighbor["distance"],
-                    },
-                    "classes": f"neighbor distance-{neighbor['distance']}",
-                })
+                nodes.append(
+                    {
+                        "data": {
+                            "id": neighbor["id"],
+                            "label": neighbor["label"],
+                            "type": neighbor["type"],
+                            "distance": neighbor["distance"],
+                        },
+                        "classes": f"neighbor distance-{neighbor['distance']}",
+                    }
+                )
 
             # Build edges
             edges = []
             for rel in relationships:
-                edges.append({
-                    "data": {
-                        "id": f"{rel['source']}-{rel['target']}",
-                        "source": rel["source"],
-                        "target": rel["target"],
-                        "label": ",".join(rel.get("types", [])),
+                edges.append(
+                    {
+                        "data": {
+                            "id": f"{rel['source']}-{rel['target']}",
+                            "source": rel["source"],
+                            "target": rel["target"],
+                            "label": ",".join(rel.get("types", [])),
+                        }
                     }
-                })
+                )
 
             return {
                 "status": "success",
@@ -392,8 +404,16 @@ class VisualizationService:
     def _get_community_color(self, community_id: int) -> str:
         """Generate color for community based on ID"""
         colors = [
-            "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7",
-            "#DDA15E", "#BC6C25", "#9D4EDD", "#5A189A", "#3C096C"
+            "#FF6B6B",
+            "#4ECDC4",
+            "#45B7D1",
+            "#96CEB4",
+            "#FFEAA7",
+            "#DDA15E",
+            "#BC6C25",
+            "#9D4EDD",
+            "#5A189A",
+            "#3C096C",
         ]
         return colors[community_id % len(colors)]
 

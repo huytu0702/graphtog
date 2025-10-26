@@ -71,9 +71,7 @@ async def get_community_members(community_id: int) -> Dict:
 
 
 @router.get("/communities/{source_entity}/path/{target_entity}")
-async def get_community_path(
-    source_entity: str, target_entity: str, max_depth: int = 3
-) -> Dict:
+async def get_community_path(source_entity: str, target_entity: str, max_depth: int = 3) -> Dict:
     """
     Find path between two entities considering community structure
 
@@ -208,9 +206,7 @@ async def retrieve_community(entity: str, include_summaries: bool = True) -> Dic
         Dictionary with community context
     """
     try:
-        result = retrieval_service.retrieve_community_context(
-            entity, include_summaries
-        )
+        result = retrieval_service.retrieve_community_context(entity, include_summaries)
         return result
     except Exception as e:
         logger.error(f"Community retrieval error: {str(e)}")
@@ -254,9 +250,7 @@ async def hierarchical_search(
         if retrieval_levels is None:
             retrieval_levels = ["local", "community", "global"]
 
-        result = retrieval_service.hierarchical_search(
-            query, retrieval_levels, combine_results
-        )
+        result = retrieval_service.hierarchical_search(query, retrieval_levels, combine_results)
         return result
     except Exception as e:
         logger.error(f"Hierarchical search error: {str(e)}")

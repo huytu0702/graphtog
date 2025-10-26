@@ -64,9 +64,7 @@ class CommunitySummarizationService:
             relationships = result["relationships"]
 
             # Generate context for LLM
-            context = self._build_community_context(
-                entities, relationships, result["entity_types"]
-            )
+            context = self._build_community_context(entities, relationships, result["entity_types"])
 
             # Generate summary using LLM
             summary_response = llm_service.generate_community_summary(context)
@@ -120,9 +118,7 @@ class CommunitySummarizationService:
 
         return context
 
-    def _store_community_summary(
-        self, session, community_id: int, summary: Dict[str, Any]
-    ) -> None:
+    def _store_community_summary(self, session, community_id: int, summary: Dict[str, Any]) -> None:
         """
         Store community summary in Neo4j
 
@@ -222,11 +218,7 @@ class CommunitySummarizationService:
                     "status": "success",
                     "community_id": result["community_id"],
                     "summary": result["summary"],
-                    "key_themes": (
-                        result["key_themes"].split(",")
-                        if result["key_themes"]
-                        else []
-                    ),
+                    "key_themes": (result["key_themes"].split(",") if result["key_themes"] else []),
                     "generated_at": result["summary_timestamp"],
                 }
 
@@ -236,9 +228,7 @@ class CommunitySummarizationService:
             logger.error(f"Failed to get community summary: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    def compare_communities(
-        self, community_id_1: int, community_id_2: int
-    ) -> Dict[str, Any]:
+    def compare_communities(self, community_id_1: int, community_id_2: int) -> Dict[str, Any]:
         """
         Compare two communities and find connections
 

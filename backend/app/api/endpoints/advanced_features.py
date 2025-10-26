@@ -18,9 +18,7 @@ router = APIRouter(tags=["advanced"])
 
 
 @router.post("/extract/few-shot")
-async def extract_with_few_shot(
-    text: str, entity_types: Optional[List[str]] = None
-) -> Dict:
+async def extract_with_few_shot(text: str, entity_types: Optional[List[str]] = None) -> Dict:
     """
     Extract entities using few-shot learning
 
