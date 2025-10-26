@@ -31,6 +31,8 @@ class Settings:
 
     # ========== CACHE - Redis ==========
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
 
     # ========== AI/LLM - Google Gemini ==========
     GOOGLE_API_KEY: Optional[str] = os.getenv("GOOGLE_API_KEY")
