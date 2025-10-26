@@ -44,6 +44,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Neo4j initialization error: {str(e)}")
 
+    # Initialize graph schema
+    try:
+        from app.services.graph_service import graph_service
+
+        if graph_service.init_schema():
+            logger.info("✅ Graph schema initialized")
+        else:
+            logger.warning("⚠️ Graph schema initialization returned False")
+    except Exception as e:
+        logger.error(f"❌ Graph schema initialization error: {str(e)}")
+
     yield
 
     # Shutdown event
@@ -107,11 +118,12 @@ async def root():
     }
 
 
-from app.api.endpoints import auth, documents
+from app.api.endpoints import auth, documents, queries
 
 # Include API routes
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(documents.router, prefix="/api")
+app.include_router(queries.router, prefix="/api")
 
 
 if __name__ == "__main__":
