@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for user data
+  postgres:
+    image: postgres:16-alpine
+    container_name: graphtog_postgres
+    environment:
+      POSTGRES_USER: graphtog_user
+      POSTGRES_PASSWORD: graphtog_password
+      POSTGRES_DB: graphtog_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U graphtog_user -d graphtog_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - graphtog_network
+
+  # Neo4j Graph Database for knowledge graph
+  neo4j:
+    image: neo4j:5.13-enterprise
+    container_name: graphtog_neo4j
+    environment:
+      NEO4J_AUTH: neo4j/graphtog_password
+      NEO4J_PLUGINS: '["apoc","graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
+      NEO4J_dbms_security_procedures_whitelist: apoc.*,gds.*
+    ports:
+      - "7687:7687" # Bolt port
+      - "7474:7474" # HTTP port
+    volumes:
+      - neo4j_data:/var/lib/neo4j/data
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:7474" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - graphtog_network
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: graphtog_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - graphtog_network
+
+volumes:
+  postgres_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  graphtog_network:
+    driver: bridge

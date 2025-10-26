@@ -1,0 +1,126 @@
+"""
+FastAPI main application module
+Initialize FastAPI app with configuration, database connections, and routes
+"""
+
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.app.config import get_settings
+from backend.app.db.neo4j import close_neo4j, init_neo4j
+from backend.app.db.postgres import init_db
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Get settings
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for FastAPI app
+    Handles startup and shutdown events
+    """
+    # Startup event
+    logger.info("🚀 Starting GraphToG application...")
+
+    # Initialize PostgreSQL
+    try:
+        init_db()
+        logger.info("✅ PostgreSQL database initialized")
+    except Exception as e:
+        logger.error(f"❌ PostgreSQL initialization error: {str(e)}")
+
+    # Initialize Neo4j
+    try:
+        init_neo4j()
+        logger.info("✅ Neo4j graph database initialized")
+    except Exception as e:
+        logger.error(f"❌ Neo4j initialization error: {str(e)}")
+
+    yield
+
+    # Shutdown event
+    logger.info("🛑 Shutting down GraphToG application...")
+    try:
+        close_neo4j()
+        logger.info("✅ Neo4j connection closed")
+    except Exception as e:
+        logger.error(f"⚠️ Neo4j shutdown warning: {str(e)}")
+
+
+# Create FastAPI app
+app = FastAPI(
+    title="GraphToG Backend",
+    description="GraphRAG-based document processing with Tree of Graphs reasoning",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Update this to specific origins in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "graphtog-backend",
+        "version": "0.1.0",
+    }
+
+
+# Info endpoint
+@app.get("/info")
+async def app_info():
+    """Application information endpoint"""
+    return {
+        "name": "GraphToG Backend",
+        "description": "GraphRAG-based document processing with Tree of Graphs reasoning",
+        "version": "0.1.0",
+        "debug_mode": settings.DEBUG,
+    }
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "Welcome to GraphToG Backend API",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+from backend.app.api.endpoints import auth, documents
+
+# Include API routes
+app.include_router(auth.router, prefix="/api/auth")
+app.include_router(documents.router, prefix="/api")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "backend.app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.DEBUG,
+        log_level=settings.LOG_LEVEL.lower(),
+    )
