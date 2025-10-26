@@ -118,7 +118,7 @@ async def root():
     }
 
 
-from app.api.endpoints import auth, documents, queries, admin, communities, advanced_features
+from app.api.endpoints import auth, documents, queries, admin, communities, advanced_features, visualization
 
 # Include API routes
 app.include_router(auth.router, prefix="/api/auth")
@@ -127,6 +127,7 @@ app.include_router(queries.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(communities.router, prefix="/api")
 app.include_router(advanced_features.router, prefix="/api")
+app.include_router(visualization.router, prefix="/api")
 
 
 if __name__ == "__main__":
