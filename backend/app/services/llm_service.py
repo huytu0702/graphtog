@@ -372,6 +372,67 @@ SUMMARY:"""
             "status": "success",
         }
 
+    def generate_community_summary(self, context: str) -> Dict[str, Any]:
+        """
+        Generate summary for a community
+
+        Args:
+            context: Community context with entities and relationships
+
+        Returns:
+            Dictionary with summary and themes
+        """
+        try:
+            self._apply_rate_limit()
+
+            prompt = f"""Based on the following community of entities and their relationships, generate a concise summary:
+
+{context}
+
+Provide:
+1. A brief summary (2-3 sentences) of what this community represents
+2. Key themes (list 3-5 main themes)
+3. Main focus area (one line)
+
+Format your response as JSON:
+{{
+    "summary": "...",
+    "themes": ["theme1", "theme2", "..."],
+    "focus_area": "..."
+}}
+"""
+
+            model = genai.GenerativeModel(self.model_name)
+            response = model.generate_content(prompt)
+
+            # Extract JSON from response
+            try:
+                result_text = response.text.strip()
+                # Remove markdown code blocks if present
+                if result_text.startswith("```json"):
+                    result_text = result_text[7:]
+                if result_text.endswith("```"):
+                    result_text = result_text[:-3]
+
+                result = json.loads(result_text)
+                logger.info("Community summary generated successfully")
+                return result
+            except json.JSONDecodeError:
+                logger.warning("Could not parse community summary JSON")
+                return {
+                    "summary": response.text[:200],
+                    "themes": [],
+                    "focus_area": "Unknown",
+                }
+
+        except Exception as e:
+            logger.error(f"Community summary generation failed: {str(e)}")
+            return {
+                "summary": "Summary generation failed",
+                "themes": [],
+                "focus_area": "Error",
+            }
+
 
 # Export singleton instance
 llm_service = LLMService()
