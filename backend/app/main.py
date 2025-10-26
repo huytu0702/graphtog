@@ -9,9 +9,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.config import get_settings
-from backend.app.db.neo4j import close_neo4j, init_neo4j
-from backend.app.db.postgres import init_db
+from app.config import get_settings
+from app.db.neo4j import close_neo4j, init_neo4j
+from app.db.postgres import init_db
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -107,7 +107,7 @@ async def root():
     }
 
 
-from backend.app.api.endpoints import auth, documents
+from app.api.endpoints import auth, documents
 
 # Include API routes
 app.include_router(auth.router, prefix="/api/auth")
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "backend.app.main:app",
+        "app.main:app",
         host="0.0.0.0",
         port=8000,
         reload=settings.DEBUG,

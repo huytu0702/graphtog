@@ -5,7 +5,7 @@ LLM service for entity and relationship extraction
 import logging
 from typing import Dict, List, Any
 
-from backend.app.config import get_settings
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

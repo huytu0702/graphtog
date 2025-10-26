@@ -6,7 +6,7 @@ from typing import Optional
 
 from neo4j import GraphDatabase, Session as Neo4jSession
 
-from backend.app.config import get_settings
+from app.config import get_settings
 
 
 class Neo4jConnection:

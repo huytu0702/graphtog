@@ -4,12 +4,12 @@
 
 > **Goal:** Establish the technical foundation for both backend and frontend systems.
 
-[ ] Set up project structure, Docker Compose, PostgreSQL, Neo4j, and environment configuration
-[ ] Initialize FastAPI backend with project structure, dependencies, and configuration
-[ ] Initialize Next.js 15 frontend with shadcn/ui, Tailwind CSS, and project structure
-[ ] Implement authentication system with NextAuth and FastAPI JWT endpoints
-[ ] Build document upload functionality (backend API + frontend UI with drag-and-drop)
-[ ] Implement document parsing using Unstructured
+[x] Set up project structure, Docker Compose, PostgreSQL, Neo4j, and environment configuration
+[x] Initialize FastAPI backend with project structure, dependencies, and configuration
+[x] Initialize Next.js 15 frontend with shadcn/ui, Tailwind CSS, and project structure
+[x] Implement authentication system with NextAuth and FastAPI JWT endpoints
+[x] Build document upload functionality (backend API + frontend UI with drag-and-drop)
+[x] Implement .md document parsing
 
 ---
 

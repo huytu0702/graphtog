@@ -9,7 +9,7 @@ from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from backend.app.db.postgres import Base
+from app.db.postgres import Base
 
 
 class DocumentStatus:
@@ -34,7 +34,7 @@ class Document(Base):
     file_path = Column(String(255), nullable=False)
     status = Column(String(20), nullable=False, default=DocumentStatus.PENDING, index=True)
     file_size = Column(BigInteger, nullable=True)  # File size in bytes
-    file_type = Column(String(20), nullable=True)  # pdf, docx, txt, pptx, xlsx
+    file_type = Column(String(20), nullable=True)  # md
     error_message = Column(String(500), nullable=True)  # Error message if processing failed
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

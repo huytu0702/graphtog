@@ -7,13 +7,6 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Required for Unstructured library
-    poppler-utils \
-    libreoffice \
-    libmagic-dev \
-    # Required for PaddleOCR image processing
-    libgl1-mesa-glx \
-    libglib2.0-0 \
     # Build essentials for compiling Python packages
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -37,14 +30,7 @@ FROM python:3.10-slim as runtime
 # Set working directory
 WORKDIR /app
 
-# Install runtime system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    poppler-utils \
-    libreoffice \
-    libmagic-dev \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
@@ -55,16 +41,14 @@ COPY . .
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle \
-    PADDLE_OCR_LANGUAGES=vi,en,ch
+    PYTHONDONTWRITEBYTECODE=1
 
 # Create uploads directory
 RUN mkdir -p /app/uploads
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
 
 # Expose port
 EXPOSE 8000

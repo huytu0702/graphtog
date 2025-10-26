@@ -1,8 +1,9 @@
-import { auth } from '@/app/api/auth/[...nextauth]/route';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
 export default async function DashboardPage() {
-  const session = await auth();
-  
+  const session = await getServerSession(authOptions);
+
   if (!session) {
     // This page will be redirected by the layout component
     return null;

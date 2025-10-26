@@ -16,7 +16,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       const res = await signIn('credentials', {
         redirect: false,
@@ -28,7 +28,7 @@ export default function LoginPage() {
         setError('Invalid email or password');
         return;
       }
-      
+
       router.push('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
@@ -87,10 +87,10 @@ export default function LoginPage() {
               Sign in
             </Button>
           </div>
-          
+
           <div className="text-sm text-center">
             <p>
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500">
                 Register here
               </Link>

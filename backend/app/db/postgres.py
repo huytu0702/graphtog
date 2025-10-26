@@ -7,7 +7,7 @@ from typing import Generator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from backend.app.config import get_settings
+from app.config import get_settings
 
 
 # SQLAlchemy Base class for all models
@@ -52,9 +52,9 @@ def get_db() -> Generator[Session, None, None]:
 def init_db() -> None:
     """Initialize database by creating all tables"""
     # Import all models to register them with the Base
-    from backend.app.models.document import Document  # noqa: F401
-    from backend.app.models.query import Query  # noqa: F401
-    from backend.app.models.user import User  # noqa: F401
+    from app.models.document import Document  # noqa: F401
+    from app.models.query import Query  # noqa: F401
+    from app.models.user import User  # noqa: F401
 
     # Create all tables
     Base.metadata.create_all(bind=engine)

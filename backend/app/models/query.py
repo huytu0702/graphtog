@@ -9,7 +9,7 @@ from sqlalchemy import Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from backend.app.db.postgres import Base
+from app.db.postgres import Base
 
 
 class Query(Base):

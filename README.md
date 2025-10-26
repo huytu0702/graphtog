@@ -5,9 +5,8 @@ A knowledge graph-based document processing and Q&A system implementing Microsof
 ## 🎯 Key Features (Phase 1.1)
 
 - ✅ **User Authentication**: Secure registration and login with JWT tokens
-- ✅ **Document Upload**: Support for PDF, DOCX, TXT, PPTX, XLSX with drag-and-drop UI
-- ✅ **Advanced OCR**: PaddleOCR integration via Unstructured library for Vietnamese and English text
-- ✅ **Document Parsing**: Intelligent document processing with structure preservation
+- ✅ **Document Upload**: Support for MD files with drag-and-drop UI
+- ✅ **Document Parsing**: Direct processing of MD files with structure preservation
 - ✅ **Knowledge Graph Foundation**: Neo4j integration for graph-based knowledge storage
 - ✅ **RESTful API**: FastAPI backend with comprehensive documentation
 - ✅ **Docker Containerization**: Ready-to-deploy with docker-compose
@@ -21,8 +20,7 @@ A knowledge graph-based document processing and Q&A system implementing Microsof
   - Neo4j (knowledge graph)
   - Redis (caching)
 - **Document Processing**: 
-  - Unstructured library
-  - PaddleOCR for advanced text extraction
+  - Direct MD file parsing and processing
 - **AI/LLM**: Google Gemini 2.5 Flash
 - **Package Manager**: uv (fast Python package manager)
 
@@ -146,7 +144,7 @@ Once the backend is running, access the interactive API documentation:
 - `GET /` - Root endpoint
 
 #### Documents (Coming in Phase 1.2)
-- `POST /api/documents/upload` - Upload document
+- `POST /api/documents/upload` - Upload MD document
 - `GET /api/documents` - List user documents
 - `GET /api/documents/{doc_id}` - Get document details
 
@@ -337,9 +335,9 @@ REDIS_URL=redis://redis:6379/0
 GOOGLE_API_KEY=your-google-api-key
 GEMINI_MODEL=gemini-2.5-flash
 
-# OCR Configuration (PaddleOCR)
-OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle
-PADDLE_OCR_LANGUAGES=vi,en,ch
+# File Upload Configuration
+MAX_UPLOAD_SIZE=52428800  # 50MB
+UPLOAD_DIR=./uploads
 
 # File Upload
 MAX_UPLOAD_SIZE=52428800  # 50MB
@@ -388,7 +386,7 @@ python -m uvicorn app.main:app --reload
 
 ## 🚧 Upcoming Features (Phase 1.2+)
 
-- Document parsing with Unstructured + PaddleOCR
+- MD document parsing and processing
 - Knowledge graph construction
 - Basic Q&A functionality
 - Community detection (Phase 2)

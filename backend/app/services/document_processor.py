@@ -1,22 +1,15 @@
 """
 Document processing service
-Handles document parsing using Unstructured library with PaddleOCR
+Handles document parsing for Markdown (.md) files only
 """
 
 import logging
-import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
-from unstructured.partition.auto import partition
-from unstructured.partition.pdf import partition_pdf
-from unstructured.partition.docx import partition_docx
-from unstructured.partition.text import partition_text
-from unstructured.partition.pptx import partition_pptx
-
-from backend.app.config import get_settings
-from backend.app.models.document import Document
-from backend.app.db.neo4j import get_neo4j_driver
+from app.config import get_settings
+from app.models.document import Document
+from app.db.neo4j import get_neo4j_session
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -30,9 +23,9 @@ class DocumentProcessingError(Exception):
 
 
 class DocumentProcessor:
-    """Document processor for parsing various file formats"""
+    """Document processor for parsing Markdown (.md) files only"""
 
-    SUPPORTED_FORMATS = {"pdf", "docx", "txt", "pptx", "xlsx"}
+    SUPPORTED_FORMATS = {"md"}
 
     @staticmethod
     def validate_file_type(file_path: str) -> bool:
@@ -43,118 +36,42 @@ class DocumentProcessor:
             file_path: Path to the file
 
         Returns:
-            True if supported, False otherwise
+            True if supported (only .md files), False otherwise
         """
         file_ext = Path(file_path).suffix.lower().lstrip(".")
         return file_ext in DocumentProcessor.SUPPORTED_FORMATS
 
     @staticmethod
-    def parse_pdf(file_path: str, languages: Optional[List[str]] = None) -> Tuple[str, List]:
+    def parse_md(file_path: str) -> Tuple[str, List]:
         """
-        Parse PDF file using Unstructured with PaddleOCR
+        Parse Markdown file and extract text content
 
         Args:
-            file_path: Path to PDF file
-            languages: Language codes for PaddleOCR (e.g., ['vi', 'en'])
+            file_path: Path to Markdown file
 
         Returns:
             Tuple of (full_text, elements)
         """
         try:
-            if languages is None:
-                languages = ["vi", "en"]
+            logger.info(f"📄 Reading Markdown file: {file_path}")
 
-            logger.info(f"📄 Parsing PDF: {file_path} with languages {languages}")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                full_text = f.read()
 
-            # Use PaddleOCR through Unstructured
-            elements = partition_pdf(
-                filename=file_path,
-                languages=languages,
-            )
+            # For Markdown, we'll create a simple element structure
+            # In a real implementation, you might want to parse the markdown structure
+            elements = [{"type": "text", "text": full_text}]
 
-            # Extract text from elements
-            full_text = "\n".join([str(el) for el in elements])
-            logger.info(f"✅ Successfully parsed PDF: {len(elements)} elements extracted")
-
+            logger.info(f"✅ Successfully parsed Markdown: {len(elements)} elements extracted")
             return full_text, elements
         except Exception as e:
-            logger.error(f"❌ Error parsing PDF: {str(e)}")
-            raise DocumentProcessingError(f"Failed to parse PDF: {str(e)}")
-
-    @staticmethod
-    def parse_docx(file_path: str) -> Tuple[str, List]:
-        """
-        Parse DOCX file
-
-        Args:
-            file_path: Path to DOCX file
-
-        Returns:
-            Tuple of (full_text, elements)
-        """
-        try:
-            logger.info(f"📄 Parsing DOCX: {file_path}")
-
-            elements = partition_docx(filename=file_path)
-            full_text = "\n".join([str(el) for el in elements])
-
-            logger.info(f"✅ Successfully parsed DOCX: {len(elements)} elements extracted")
-            return full_text, elements
-        except Exception as e:
-            logger.error(f"❌ Error parsing DOCX: {str(e)}")
-            raise DocumentProcessingError(f"Failed to parse DOCX: {str(e)}")
-
-    @staticmethod
-    def parse_txt(file_path: str) -> Tuple[str, List]:
-        """
-        Parse TXT file
-
-        Args:
-            file_path: Path to TXT file
-
-        Returns:
-            Tuple of (full_text, elements)
-        """
-        try:
-            logger.info(f"📄 Parsing TXT: {file_path}")
-
-            elements = partition_text(filename=file_path)
-            full_text = "\n".join([str(el) for el in elements])
-
-            logger.info(f"✅ Successfully parsed TXT: {len(elements)} elements extracted")
-            return full_text, elements
-        except Exception as e:
-            logger.error(f"❌ Error parsing TXT: {str(e)}")
-            raise DocumentProcessingError(f"Failed to parse TXT: {str(e)}")
-
-    @staticmethod
-    def parse_pptx(file_path: str) -> Tuple[str, List]:
-        """
-        Parse PPTX file
-
-        Args:
-            file_path: Path to PPTX file
-
-        Returns:
-            Tuple of (full_text, elements)
-        """
-        try:
-            logger.info(f"📄 Parsing PPTX: {file_path}")
-
-            elements = partition_pptx(filename=file_path)
-            full_text = "\n".join([str(el) for el in elements])
-
-            logger.info(f"✅ Successfully parsed PPTX: {len(elements)} elements extracted")
-            return full_text, elements
-        except Exception as e:
-            logger.error(f"❌ Error parsing PPTX: {str(e)}")
-            raise DocumentProcessingError(f"Failed to parse PPTX: {str(e)}")
+            logger.error(f"❌ Error parsing Markdown: {str(e)}")
+            raise DocumentProcessingError(f"Failed to parse Markdown: {str(e)}")
 
     @staticmethod
     def process_document(file_path: str) -> Tuple[str, List]:
         """
-        Process document based on file type
-        Auto-detects file format and calls appropriate parser
+        Process Markdown document
 
         Args:
             file_path: Path to document file
@@ -169,14 +86,8 @@ class DocumentProcessor:
 
         logger.info(f"🔄 Processing document: {file_path} (type: {file_ext})")
 
-        if file_ext == "pdf":
-            return DocumentProcessor.parse_pdf(file_path)
-        elif file_ext == "docx":
-            return DocumentProcessor.parse_docx(file_path)
-        elif file_ext == "txt":
-            return DocumentProcessor.parse_txt(file_path)
-        elif file_ext == "pptx":
-            return DocumentProcessor.parse_pptx(file_path)
+        if file_ext == "md":
+            return DocumentProcessor.parse_md(file_path)
         else:
             raise DocumentProcessingError(f"Unsupported file format: {file_ext}")
 
@@ -210,7 +121,7 @@ def process_document(document_id: int, file_path: str, db: Session):
     Process document in background task
     This function is designed to run as a background task
     """
-    from backend.app.services.llm_service import extract_entities_and_relationships  # Import here to avoid circular import
+    from app.services.llm_service import extract_entities_and_relationships  # Import here to avoid circular import
     
     try:
         # Update document status to processing
@@ -229,8 +140,8 @@ def process_document(document_id: int, file_path: str, db: Session):
         chunks = DocumentProcessor.chunk_text(full_text)
         
         # Connect to Neo4j to store the document data
-        driver = get_neo4j_driver()
-        with driver.session() as session:
+        session = get_neo4j_session()
+        with session:
             # Create document node in Neo4j
             session.run(
                 """

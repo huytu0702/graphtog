@@ -10,7 +10,7 @@
 
 **AI**: Google Gemini 2.5 Flash via Google AI SDK
 
-**Document Processing**: Unstructured library (Open Source, self-hosted) with **PaddleOCR**
+**Document Processing**: Direct .md file loading
 
 **Vector Search**: Neo4j Vector Index (Neo4j 5.11+)
 
@@ -55,26 +55,15 @@
   - Sync environment: `uv sync`
   - Run scripts: `uv run <command>`
 
-- Key Python dependencies (via uv): `fastapi`, `uvicorn[standard]`, `sqlalchemy`, `psycopg2-binary`, `neo4j`, `unstructured[pdf,docx,pptx]`, `paddlepaddle`, `paddleocr`, `google-generativeai`, `python-multipart`, `python-jose[cryptography]`, `passlib[bcrypt]`, `Pillow`, `python-dotenv`
+- Key Python dependencies (via uv): `fastapi`, `uvicorn[standard]`, `sqlalchemy`, `psycopg2-binary`, `neo4j`, `google-generativeai`, `python-multipart`, `python-jose[cryptography]`, `passlib[bcrypt]`, `python-dotenv`
 
 - System dependencies (install via Dockerfile):
-  - `poppler-utils` - for PDF processing
-  - `libreoffice` - for DOCX/PPTX conversion
-  - `libmagic-dev` - for file type detection
-  - `libgl1-mesa-glx` and `libglib2.0-0` - for PaddleOCR image processing dependencies
-
-- PaddleOCR Configuration:
-  - Set environment variable in `.env` and Dockerfile: `OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle`
-  - PaddleOCR automatically downloads pre-trained models on first use (~200MB for detection + recognition models)
-  - Supports 80+ languages including Vietnamese with significantly better accuracy than Tesseract
-  - Language codes: `vi` for Vietnamese, `en` for English, `ch` for Chinese (note: different from Tesseract codes)
-  - Use `paddleocr==3.3.0` for latest features and bug fixes
+  - No special system dependencies needed for .md file processing
 
 - Dockerfile will use multi-stage build:
-  - Stage 1: Install system dependencies (including PaddleOCR dependencies) and uv
+  - Stage 1: Install system dependencies and uv
   - Stage 2: Copy app and use `uv sync --frozen` for reproducible builds
   - Use `uv` to manage Python environment inside container
-  - Set `OCR_AGENT` environment variable in Dockerfile
 
 **Frontend Setup**:
 
@@ -163,7 +152,7 @@
 - Create document upload endpoint: `POST /api/documents/upload`
 - Implement file validation (type, size limits: 50MB)
 - Store files in local `uploads/` directory (structure: `uploads/{user_id}/{doc_id}/`)
-- Support formats: PDF, DOCX, TXT, PPTX, XLSX
+- Support formats: MD files
 - Save document metadata to PostgreSQL
 - Background task queue for processing (use `BackgroundTasks` from FastAPI)
 
@@ -178,16 +167,9 @@
 
 **Document Processor Service** (`document_processor.py`):
 
-- Use `unstructured` library (open-source) for multi-format parsing
-- PaddleOCR handles PDFs with images and scanned documents automatically through Unstructured
-- PaddleOCR advantages:
-  - Better accuracy for Vietnamese text and complex layouts
-  - Built-in document structure analysis
-  - Supports table detection and recognition
-  - No need for separate language pack installations
+- Parse .md files directly to extract text content
 - Extract text, preserve structure (headings, paragraphs, lists)
 - Chunk text into semantic units (paragraphs/sections)
-- Configure languages in partition functions: `partition_pdf(filename=..., languages=["en", "vi"])`
 
 **Entity Extraction using Gemini**:
 
@@ -268,7 +250,7 @@
 - Display: total documents, entities, relationships
 - Basic graph visualization using Neo4j Browser iframe
 - API health checks
-- OCR diagnostics: display detected text samples and language detection results
+
 
 ---
 
@@ -413,7 +395,6 @@
   - Frequently accessed entities
   - Community summaries
   - Recent query results
-  - PaddleOCR model cache (models are loaded once and reused)
 - Implement cache invalidation on document updates
 
 **Database Optimization**:
@@ -439,11 +420,7 @@
 - Unit tests for document parsing
 - Integration tests for graph creation
 - End-to-end test: upload document → query → get answer
-- Test with sample documents (PDF, DOCX, TXT)
-- PaddleOCR specific tests:
-  - Vietnamese text recognition accuracy
-  - Mixed language document processing
-  - Scanned document quality assessment
+- Test with sample .md documents
 
 **Phase 2 Testing**:
 
@@ -457,14 +434,13 @@
 **Development Environment**:
 
 - Docker Compose for local development
-- Environment variables in `.env` file (including `OCR_AGENT`)
+- Environment variables in `.env` file
 - Hot reload for both frontend and backend
-- Volume mount for PaddleOCR model cache to avoid re-downloading
 
 **Phase 1 Deliverables**:
 
 - Working authentication system
-- Document upload and processing with PaddleOCR
+- Document upload and processing of .md files
 - Basic knowledge graph creation
 - Simple Q&A functionality
 - Minimal UI for testing

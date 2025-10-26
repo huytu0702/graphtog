@@ -36,18 +36,14 @@ class Settings:
     GOOGLE_API_KEY: Optional[str] = os.getenv("GOOGLE_API_KEY")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-    # ========== OCR CONFIGURATION ==========
-    OCR_AGENT: str = os.getenv(
-        "OCR_AGENT",
-        "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
-    )
-    PADDLE_OCR_LANGUAGES: str = os.getenv("PADDLE_OCR_LANGUAGES", "vi,en,ch")
+    # ========== DOCUMENT PROCESSING CONFIG ==========
+    # Direct MD file processing - no external services needed
 
     # ========== FILE UPLOAD CONFIG ==========
     MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "52428800"))  # 50MB
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")
     ALLOWED_DOCUMENT_TYPES: list = os.getenv(
-        "ALLOWED_DOCUMENT_TYPES", "pdf,docx,txt,pptx,xlsx"
+        "ALLOWED_DOCUMENT_TYPES", "md"
     ).split(",")
 
     # ========== LANGSMITH CONFIG ==========

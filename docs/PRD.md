@@ -25,7 +25,7 @@ To create an intuitive document processing platform that enables users to extrac
 
 ### 2.2 Success Metrics
 - Average response time for Q&A queries under 5 seconds (with ToG processing)
-- Support for document types: PDF, DOCX, TXT, PPTX, XLSX
+- Support for document types: MD files
 - 95% uptime for the application
 - Support for up to 1000 concurrent users
 - User satisfaction rating of 4+ stars
@@ -52,9 +52,9 @@ To create an intuitive document processing platform that enables users to extrac
 
 ### 4.2 Document Processing
 - File upload functionality (drag and drop, multiple files)
-- Document parsing and validation
+- .md document parsing and validation
 - Progress tracking during processing
-- Support for multiple file formats
+- Support for .md file format
 - File size limits and validation
 
 ### 4.3 Knowledge Graph Integration with ToG
@@ -138,7 +138,7 @@ The Tree of Graphs approach will enable the system to:
 5. Provide explainable AI by showing the reasoning path
 
 ### 6.3 Implementation Steps
-1. **Document Parsing**: Extract text, images, and structured data from uploaded documents
+1. **Document Parsing**: Extract text and structured data from uploaded .md documents
 2. **Entity Recognition**: Identify and classify entities (people, places, organizations, concepts)
 3. **Relationship Extraction**: Determine relationships between identified entities
 4. **Graph Construction**: Create a knowledge graph representation of document content
@@ -241,7 +241,7 @@ Relationships:
 2. Introduction to the platform capabilities including ToG reasoning
 
 ### 8.2 Document Upload and Processing
-1. User selects documents for upload
+1. User selects .md documents for upload
 2. File validation and progress tracking
 3. Background processing with status updates
 4. Knowledge graph construction with ToG compatibility

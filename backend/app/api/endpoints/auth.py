@@ -5,11 +5,11 @@ Authentication API endpoints
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend.app.db.postgres import get_db
-from backend.app.models.user import User
-from backend.app.schemas.auth import TokenResponse, UserLogin, UserRegister, UserResponse
-from backend.app.services.auth import get_current_user
-from backend.app.services.security import (
+from app.db.postgres import get_db
+from app.models.user import User
+from app.schemas.auth import TokenResponse, UserLogin, UserRegister, UserResponse
+from app.services.auth import get_current_user
+from app.services.security import (
     create_access_token,
     hash_password,
     verify_password,

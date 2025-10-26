@@ -10,8 +10,8 @@ from uuid import UUID
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from backend.app.config import get_settings
-from backend.app.schemas.auth import TokenPayload
+from app.config import get_settings
+from app.schemas.auth import TokenPayload
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

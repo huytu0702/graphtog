@@ -9,11 +9,11 @@ This is a knowledge graph-based document processing and Q&A system that implemen
 - **Backend**: FastAPI + Python 3.10+
 - **Databases**: PostgreSQL (user data) + Neo4j (knowledge graph)
 - **AI**: Google Gemini 2.5 Flash via Google AI SDK
-- **Document Processing**: Unstructured library with PaddleOCR for enhanced document parsing
+- **Document Processing**: Direct .md file loading
 - **Architecture**: Containerized with Docker Compose
 
 ### Core Features:
-- Document upload and processing (PDF, DOCX, TXT, PPTX, XLSX)
+- Document upload and processing (MD files)
 - Knowledge graph construction with entity and relationship extraction
 - Advanced Q&A with GraphRAG and Tree of Graphs (ToG) reasoning
 - Multi-level retrieval with community detection (Leiden algorithm)
@@ -28,7 +28,7 @@ The project is currently focused on implementing Phase 1 and Phase 2 features as
 ### Phase 1 - MVP Development with GraphRAG Foundation:
 - Basic user authentication system
 - Document upload functionality with drag-and-drop UI
-- Document parsing using Unstructured library with PaddleOCR
+- Document parsing from .md files directly
 - Knowledge graph construction in Neo4j
 - Basic Q&A functionality with simple graph retrieval
 - Entity and relationship extraction using Gemini
@@ -103,7 +103,7 @@ The project is currently focused on implementing Phase 1 and Phase 2 features as
    ```bash
    cd backend
    uv init  # Initialize project
-   uv add fastapi uvicorn[standard] sqlalchemy psycopg2-binary neo4j unstructured[pdf,docx,pptx] paddlepaddle paddleocr google-generativeai python-multipart python-jose[cryptography] passlib[bcrypt] Pillow python-dotenv
+   uv add fastapi uvicorn[standard] sqlalchemy psycopg2-binary neo4j google-generativeai python-multipart python-jose[cryptography] passlib[bcrypt] python-dotenv
    uv sync  # Install dependencies
    uv run uvicorn app.main:app --reload  # Run development server
    ```
@@ -125,7 +125,6 @@ The project is currently focused on implementing Phase 1 and Phase 2 features as
 Create a `.env` file with:
 - Google Gemini API key
 - Database connection strings
-- OCR configuration: `OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle`
 
 ## Development Conventions
 
@@ -159,9 +158,6 @@ Key files in the repository:
 - `.cursor/plans/` - Implementation plan files
 
 ## Special Notes
-
-### PaddleOCR Integration:
-The project uses PaddleOCR for Vietnamese and English text and complex document layouts. The OCR agent is configured through the `OCR_AGENT` environment variable.
 
 ### LangGraph Agent:
 The system will feature a LangGraph agent that automatically classifies question types and selects the most appropriate processing strategy:

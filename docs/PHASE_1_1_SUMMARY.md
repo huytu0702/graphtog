@@ -12,15 +12,12 @@
 - [x] Configuration management via `backend/app/config.py`
   - Environment variable loading
   - Default values for all settings
-  - PaddleOCR configuration built-in
 
 ### 2. **Backend Setup** ✅ COMPLETED
 - [x] `pyproject.toml` with uv package manager:
   - FastAPI, Uvicorn, SQLAlchemy
   - PostgreSQL driver (psycopg2-binary)
   - Neo4j driver
-  - Unstructured library with PDF/DOCX/PPTX support
-  - PaddleOCR 3.3.0 and PaddlePaddle
   - Google Generative AI (Gemini)
   - JWT auth utilities (python-jose, passlib)
   - Redis client
@@ -60,10 +57,8 @@
 
 ### 5. **Document Processing** ✅ COMPLETED
 - [x] `document_processor.py` service with:
-  - Support for PDF, DOCX, TXT, PPTX formats
-  - PaddleOCR integration for advanced OCR
-  - Language support: Vietnamese (vi), English (en), Chinese (ch)
-  - Multi-format parsing with Unstructured library
+  - Support for Markdown (.md) files only
+  - Direct text extraction from Markdown files
   - Text chunking with overlaps
   - Error handling and logging
   - Modular design for easy extension
@@ -71,10 +66,7 @@
 ### 6. **Docker & Deployment** ✅ COMPLETED
 - [x] Backend Dockerfile:
   - Multi-stage build (builder + runtime)
-  - System dependencies installation (poppler, libreoffice, libmagic, libgl1, libglib2)
-  - PaddleOCR setup with language support
   - Health checks configured
-  - Environment variables for PaddleOCR
   - Uploads directory creation
 - [x] `.gitignore` - Comprehensive ignore patterns
 - [x] `.dockerignore` - Optimized Docker build
@@ -106,7 +98,7 @@
 - [x] File management controls
 
 ### 9. **Document Management Implementation** ✅ COMPLETED
-- [x] File validation (type, size) in upload endpoint
+- [x] File validation (.md files only) in upload endpoint
 - [x] Storage management with uploads directory
 - [x] Metadata extraction during upload process
 - [x] Database record creation for documents
@@ -164,11 +156,11 @@ curl -X POST http://localhost:8000/api/auth/token \
 ## 🔄 Next Steps
 
 ### Phase 1.2 - Knowledge Graph
-1. Document upload endpoint processing workflow
-2. Knowledge graph population from documents
-3. Entity extraction with Gemini
-4. Basic Q&A functionality
-5. Graph-based search/retrieval endpoints
+1. [x] Document upload processing workflow (completed for .md files)
+2. [ ] Knowledge graph population from documents
+3. [ ] Entity extraction with Gemini
+4. [ ] Basic Q&A functionality
+5. [ ] Graph-based search/retrieval endpoints
 
 ### Phase 2 - Advanced Features
 1. Community detection with Leiden algorithm
@@ -239,8 +231,6 @@ curl -X POST http://localhost:8000/api/auth/token \
 - FastAPI 0.104+
 - SQLAlchemy 2.0+
 - Neo4j 5.14+
-- Unstructured 0.12+
-- PaddleOCR 3.3
 - Pydantic 2.0+
 - python-jose & passlib
 - uvicorn

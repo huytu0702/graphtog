@@ -2,12 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, BackgroundTas
 from sqlalchemy.orm import Session
 from typing import List
 
-from backend.app.db.postgres import get_db
-from backend.app.models.user import User
-from backend.app.models.document import Document
-from backend.app.schemas.document import DocumentResponse
-from backend.app.services.auth import get_current_user
-from backend.app.services.document_processor import process_document
+from app.db.postgres import get_db
+from app.models.user import User
+from app.models.document import Document
+from app.schemas.document import DocumentResponse
+from app.services.auth import get_current_user
+from app.services.document_processor import process_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -18,12 +18,13 @@ async def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Validate file type
-    allowed_types = ["application/pdf", "application/msword", 
-                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                     "text/plain"]
-    if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail="File type not allowed")
+    # Validate file type - only .md files are allowed
+    if not file.filename.lower().endswith('.md'):
+        raise HTTPException(status_code=400, detail="Only Markdown (.md) files are allowed")
+    
+    # Additional check: ensure that the file has a .md extension
+    if not file.filename.lower().endswith('.md'):
+        raise HTTPException(status_code=400, detail="Only Markdown (.md) files are allowed")
     
     # Save file to a temporary location
     file_location = f"uploads/{file.filename}"
@@ -35,7 +36,8 @@ async def upload_document(
         filename=file.filename,
         file_path=file_location,
         status="processing",
-        user_id=current_user.id
+        user_id=current_user.id,
+        file_type="md"
     )
     db.add(db_document)
     db.commit()

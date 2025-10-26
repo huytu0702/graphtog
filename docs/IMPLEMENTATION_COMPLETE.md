@@ -28,10 +28,9 @@
 - User information endpoints
 
 ### ✅ Document Processing
-- **PaddleOCR Integration** via Unstructured library
-- Support for PDF, DOCX, TXT, PPTX formats
-- Vietnamese/English language support
-- Text extraction and chunking
+- **Markdown (.md) file support only**
+- Simple text extraction from Markdown files
+- Text parsing and chunking
 - Error handling and logging
 
 ### ✅ Deployment Ready
@@ -72,7 +71,7 @@ graphtog/
 │   │   └── services/
 │   │       ├── __init__.py
 │   │       ├── security.py ✅
-│   │       └── document_processor.py ✅ PaddleOCR integration
+│   │       └── document_processor.py ✅ 
 │   ├── Dockerfile ✅
 │   ├── pyproject.toml ✅
 │   ├── .python-version ✅
@@ -226,7 +225,7 @@ filename (VARCHAR)
 file_path (VARCHAR)
 status (VARCHAR) - pending/processing/completed/failed
 file_size (BIGINT)
-file_type (VARCHAR) - pdf/docx/txt/pptx/xlsx
+file_type (VARCHAR) - md
 error_message (VARCHAR)
 created_at (TIMESTAMP)
 updated_at (TIMESTAMP)
@@ -267,10 +266,9 @@ updated_at (TIMESTAMP)
 - Input validation with Pydantic
 - CORS protection
 
-✅ **Advanced Document Processing**
-- PaddleOCR for Vietnamese/English OCR
-- Multi-format document support
-- Intelligent text extraction and chunking
+✅ **Document Processing**
+- Markdown (.md) file support only
+- Simple text extraction and chunking
 
 ✅ **Complete Docker Setup**
 - Multi-stage builds for optimization
@@ -289,7 +287,7 @@ updated_at (TIMESTAMP)
 ## 🔄 What's Next (Phase 1.2)
 
 ### Document Processing Pipeline
-- [ ] Document upload endpoint processing workflow
+- [x] Document upload endpoint processing workflow (Markdown files only)
 - [ ] Knowledge graph population from documents
 - [ ] Entity extraction with Gemini
 - [ ] Basic Q&A functionality
@@ -340,10 +338,8 @@ updated_at (TIMESTAMP)
 - Redis 7
 
 **Document Processing**
-- Unstructured library
-- PaddleOCR 3.3
-- Poppler utils for PDFs
-- LibreOffice for DOCX/PPTX
+- Markdown (.md) file processing only
+- Simple text extraction
 
 **Security**
 - python-jose + passlib + bcrypt
@@ -438,7 +434,7 @@ The GraphToG backend is fully functional with:
 - ✅ Complete authentication system
 - ✅ Database infrastructure
 - ✅ API endpoints for auth
-- ✅ Document processing with PaddleOCR
+- ✅ Document processing for .md files
 - ✅ Docker containerization
 - ✅ Development environment setup
 - ✅ Comprehensive documentation

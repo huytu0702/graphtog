@@ -48,11 +48,8 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'application/pdf': ['.pdf'],
-      'application/msword': ['.doc'],
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-      'text/plain': ['.txt'],
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx']
+      'text/markdown': ['.md'],
+      'text/x-markdown': ['.md']
     },
     maxFiles: 1,
     multiple: false
@@ -72,11 +69,11 @@ export default function DocumentUpload({ onUploadSuccess }: DocumentUploadProps)
           <p className="mt-2 text-lg font-medium text-gray-900">Drop the file here ...</p>
         ) : (
           <p className="mt-2 text-lg font-medium text-gray-900">
-            Drag & drop a document here, or click to select
+            Drag & drop a Markdown file here, or click to select
           </p>
         )}
         <p className="mt-1 text-sm text-gray-500">
-          Supports PDF, DOCX, DOC, TXT, PPTX (Max 1 file at a time)
+          Supports Markdown (.md) files only (Max 1 file at a time)
         </p>
       </div>
 
