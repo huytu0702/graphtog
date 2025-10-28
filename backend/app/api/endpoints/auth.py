@@ -15,7 +15,7 @@ from app.services.security import (
     verify_password,
 )
 
-router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+router = APIRouter(tags=["Authentication"])
 
 
 @router.post("/register", response_model=UserResponse)
@@ -99,6 +99,24 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
             created_at=user.created_at.isoformat(),
         ),
     )
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login_alias(user_data: UserLogin, db: Session = Depends(get_db)):
+    """
+    Login and get access token (alias for /token endpoint)
+
+    Args:
+        user_data: User login credentials
+        db: Database session
+
+    Returns:
+        Access token and user information
+
+    Raises:
+        HTTPException: If credentials are invalid
+    """
+    return await login(user_data, db)
 
 
 @router.get("/me", response_model=UserResponse)

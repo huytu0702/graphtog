@@ -1,5 +1,6 @@
 import './globals.css'
 import { ReactNode } from 'react'
+import SessionProviderWrapper from '@/components/providers'
 
 export const metadata = {
   title: 'GraphToG',
@@ -9,7 +10,11 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <SessionProviderWrapper>
+          {children}
+        </SessionProviderWrapper>
+      </body>
     </html>
   )
 }

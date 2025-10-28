@@ -109,7 +109,7 @@ class GraphService:
 
             result = session.run(
                 query,
-                document_id=document_id,
+                document_id=str(document_id),  # Convert UUID to string for Neo4j
                 document_name=document_name,
                 file_path=file_path,
             )
@@ -164,7 +164,7 @@ class GraphService:
             result = session.run(
                 query,
                 textunit_id=textunit_id,
-                document_id=document_id,
+                document_id=str(document_id),  # Convert UUID to string for Neo4j
                 text=text,
                 start_char=start_char,
                 end_char=end_char,
@@ -331,7 +331,9 @@ class GraphService:
             logger.error(f"Relationship creation error: {e}")
             return False
 
-    def find_entity_by_name(self, name: str, entity_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def find_entity_by_name(
+        self, name: str, entity_type: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Find an entity by name and optionally type
 
@@ -367,6 +369,53 @@ class GraphService:
             logger.error(f"Entity lookup error: {e}")
             return None
 
+    def get_top_entities(
+        self, limit: int = 10, document_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get top entities from the graph, ordered by mention count and confidence
+
+        Args:
+            limit: Maximum number of entities to return
+            document_id: Optional document ID to filter entities
+
+        Returns:
+            List of entity data dictionaries
+        """
+        try:
+            session = self.get_session()
+
+            if document_id:
+                query = """
+                MATCH (d:Document {id: $document_id})<-[:BELONGS_TO]-(t:TextUnit)<-[:MENTIONED_IN]-(e:Entity)
+                RETURN DISTINCT e.id as id, e.name as name, e.type as type, 
+                       e.description as description, e.confidence as confidence,
+                       e.mention_count as mention_count
+                ORDER BY e.mention_count DESC, e.confidence DESC
+                LIMIT $limit
+                """
+                result = session.run(query, document_id=document_id, limit=limit)
+            else:
+                query = """
+                MATCH (e:Entity)
+                RETURN e.id as id, e.name as name, e.type as type, 
+                       e.description as description, e.confidence as confidence,
+                       COALESCE(e.mention_count, 1) as mention_count
+                ORDER BY mention_count DESC, e.confidence DESC
+                LIMIT $limit
+                """
+                result = session.run(query, limit=limit)
+
+            entities = []
+            for record in result:
+                entities.append(dict(record))
+
+            return entities
+
+        except Exception as e:
+            logger.error(f"Top entities retrieval error: {e}")
+            return []
+
     def get_entity_context(
         self,
         entity_id: str,
@@ -388,13 +437,15 @@ class GraphService:
             # Get entity and related entities
             query = """
             MATCH (e:Entity {id: $entity_id})
-            MATCH path = (e)-[r*1..{hops}]-(related:Entity)
+            OPTIONAL MATCH path = (e)-[r*1..{hops}]-(related:Entity)
             RETURN DISTINCT
                 e.id as central_entity_id,
                 e.name as central_entity_name,
-                COLLECT(DISTINCT {id: related.id, name: related.name, type: related.type}) as related_entities,
-                COLLECT(DISTINCT {type: type(r), description: last(r).description}) as relationship_types
-            """.format(hops=hop_limit)
+                COLLECT(DISTINCT {{id: related.id, name: related.name, type: related.type}}) as related_entities,
+                COLLECT(DISTINCT {{type: type(r), description: last(r).description}}) as relationship_types
+            """.format(
+                hops=hop_limit
+            )
 
             result = session.run(query, entity_id=entity_id)
             record = result.single()

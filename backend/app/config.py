@@ -6,6 +6,10 @@ Loads environment variables and provides centralized configuration
 import os
 from functools import lru_cache
 from typing import Optional
+from dotenv import load_dotenv
+
+# Load .env file from backend directory
+load_dotenv()
 
 
 class Settings:
@@ -15,7 +19,8 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    # Increased from 30 to 1440 minutes (24 hours) to prevent token expiration during active sessions
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
     # ========== DATABASE - PostgreSQL ==========
     DATABASE_URL: str = os.getenv(
@@ -36,7 +41,7 @@ class Settings:
 
     # ========== AI/LLM - Google Gemini ==========
     GOOGLE_API_KEY: Optional[str] = os.getenv("GOOGLE_API_KEY")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
     # ========== DOCUMENT PROCESSING CONFIG ==========
     # Direct MD file processing - no external services needed
@@ -56,6 +61,22 @@ class Settings:
     def __init__(self):
         """Initialize settings and create upload directory if it doesn't exist"""
         os.makedirs(self.UPLOAD_DIR, exist_ok=True)
+        self._validate_critical_settings()
+
+    def _validate_critical_settings(self):
+        """Validate that critical settings are configured"""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if not self.GOOGLE_API_KEY:
+            logger.warning(
+                "⚠️  GOOGLE_API_KEY is not configured!\n"
+                "   Get your key from: https://ai.google.dev/\n"
+                "   Then set it in environment variable: GOOGLE_API_KEY=your_key_here\n"
+                "   Or create a .env file in the backend directory with:\n"
+                "   GOOGLE_API_KEY=your_key_here"
+            )
 
 
 @lru_cache()

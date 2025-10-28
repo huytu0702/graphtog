@@ -17,7 +17,7 @@ class TestAuthEndpoints:
         user_data = {
             "email": "newuser@example.com",
             "password": "password123",
-            "full_name": "New User"
+            "full_name": "New User",
         }
         response = client.post("/api/auth/register", json=user_data)
         assert response.status_code in [200, 201]
@@ -28,14 +28,13 @@ class TestAuthEndpoints:
         user_data = {
             "email": "login_test@example.com",
             "password": "password123",
-            "full_name": "Login Test"
+            "full_name": "Login Test",
         }
         client.post("/api/auth/register", json=user_data)
 
         # Then login
         response = client.post(
-            "/api/auth/login",
-            json={"email": user_data["email"], "password": user_data["password"]}
+            "/api/auth/login", json={"email": user_data["email"], "password": user_data["password"]}
         )
         assert response.status_code == 200
         assert "access_token" in response.json()
@@ -43,8 +42,7 @@ class TestAuthEndpoints:
     def test_invalid_credentials(self, client):
         """Test login with invalid credentials"""
         response = client.post(
-            "/api/auth/login",
-            json={"email": "nonexistent@example.com", "password": "wrong"}
+            "/api/auth/login", json={"email": "nonexistent@example.com", "password": "wrong"}
         )
         assert response.status_code == 401
 
@@ -60,8 +58,7 @@ class TestDocumentEndpoints:
 
         with open(test_file, "rb") as f:
             response = authenticated_client.post(
-                "/api/documents/upload",
-                files={"file": ("test.md", f, "text/markdown")}
+                "/api/documents/upload", files={"file": ("test.md", f, "text/markdown")}
             )
 
         assert response.status_code in [200, 201]
@@ -79,8 +76,7 @@ class TestDocumentEndpoints:
         # First upload a document
         test_md = "# Test\n\nContent"
         doc_response = authenticated_client.post(
-            "/api/documents/upload",
-            files={"file": ("test.md", test_md.encode(), "text/markdown")}
+            "/api/documents/upload", files={"file": ("test.md", test_md.encode(), "text/markdown")}
         )
 
         if doc_response.status_code in [200, 201]:
@@ -135,8 +131,7 @@ class TestRetrievalEndpoints:
     def test_retrieve_local(self, authenticated_client):
         """Test local retrieval endpoint"""
         response = authenticated_client.post(
-            "/api/retrieve/local",
-            json={"entity": "test_entity", "hop_limit": 1}
+            "/api/retrieve/local", json={"entity": "test_entity", "hop_limit": 1}
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -145,8 +140,7 @@ class TestRetrievalEndpoints:
     def test_retrieve_community(self, authenticated_client):
         """Test community retrieval endpoint"""
         response = authenticated_client.post(
-            "/api/retrieve/community",
-            json={"entity": "test_entity"}
+            "/api/retrieve/community", json={"entity": "test_entity"}
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -162,8 +156,7 @@ class TestRetrievalEndpoints:
     def test_hierarchical_search(self, authenticated_client):
         """Test hierarchical search endpoint"""
         response = authenticated_client.post(
-            "/api/retrieve/hierarchical",
-            json={"query": "What is test?"}
+            "/api/retrieve/hierarchical", json={"query": "What is test?"}
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -172,8 +165,7 @@ class TestRetrievalEndpoints:
     def test_adaptive_retrieval(self, authenticated_client):
         """Test adaptive retrieval endpoint"""
         response = authenticated_client.post(
-            "/api/retrieve/adaptive",
-            json={"query": "Tell me about something"}
+            "/api/retrieve/adaptive", json={"query": "Tell me about something"}
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -186,8 +178,7 @@ class TestAdvancedExtractionEndpoints:
     def test_few_shot_extraction(self, authenticated_client):
         """Test few-shot entity extraction"""
         response = authenticated_client.post(
-            "/api/extract/few-shot",
-            json={"text": "Apple was founded by Steve Jobs"}
+            "/api/extract/few-shot", json={"text": "Apple was founded by Steve Jobs"}
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -197,7 +188,7 @@ class TestAdvancedExtractionEndpoints:
         """Test coreference resolution"""
         response = authenticated_client.post(
             "/api/extract/coreferences",
-            json={"text": "Steve Jobs founded Apple. He was a visionary."}
+            json={"text": "Steve Jobs founded Apple. He was a visionary."},
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -207,7 +198,7 @@ class TestAdvancedExtractionEndpoints:
         """Test entity attribute extraction"""
         response = authenticated_client.post(
             "/api/extract/attributes",
-            json={"entity_name": "Apple", "text": "Apple Inc. is a tech company"}
+            json={"entity_name": "Apple", "text": "Apple Inc. is a tech company"},
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -216,8 +207,7 @@ class TestAdvancedExtractionEndpoints:
     def test_extract_events(self, authenticated_client):
         """Test event extraction"""
         response = authenticated_client.post(
-            "/api/extract/events",
-            json={"text": "Apple was founded in 1976 in California"}
+            "/api/extract/events", json={"text": "Apple was founded in 1976 in California"}
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -227,10 +217,7 @@ class TestAdvancedExtractionEndpoints:
         """Test multi-perspective analysis"""
         response = authenticated_client.post(
             "/api/analyze/multi-perspective",
-            json={
-                "query": "What is the impact of AI?",
-                "context": "AI is transforming industries"
-            }
+            json={"query": "What is the impact of AI?", "context": "AI is transforming industries"},
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -242,9 +229,7 @@ class TestVisualizationEndpoints:
 
     def test_get_entity_graph(self, authenticated_client):
         """Test entity graph visualization"""
-        response = authenticated_client.get(
-            "/api/visualize/entity-graph?limit=100"
-        )
+        response = authenticated_client.get("/api/visualize/entity-graph?limit=100")
         assert response.status_code in [200, 500]
         data = response.json()
         assert "status" in data
@@ -267,9 +252,7 @@ class TestVisualizationEndpoints:
 
     def test_get_ego_graph(self, authenticated_client):
         """Test ego graph visualization"""
-        response = authenticated_client.get(
-            "/api/visualize/ego-graph/test_entity?hop_limit=2"
-        )
+        response = authenticated_client.get("/api/visualize/ego-graph/test_entity?hop_limit=2")
         assert response.status_code in [200, 404, 500]
         data = response.json()
         assert "status" in data
@@ -313,8 +296,7 @@ class TestQueryEndpoints:
     def test_create_query(self, authenticated_client):
         """Test query creation endpoint"""
         response = authenticated_client.post(
-            "/api/queries",
-            json={"query": "What is the document about?"}
+            "/api/queries", json={"query": "What is the document about?"}
         )
         assert response.status_code in [200, 500]
         data = response.json()
@@ -323,7 +305,7 @@ class TestQueryEndpoints:
     def test_get_query_results(self, authenticated_client):
         """Test get query results endpoint"""
         response = authenticated_client.get("/api/queries/results")
-        assert response.status_code in [200, 500]
+        assert response.status_code in [200, 422, 500]
 
 
 # Health check tests

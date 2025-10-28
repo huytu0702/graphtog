@@ -284,3 +284,33 @@ async def process_document_with_graph(
             logger.error(f"Error updating document status: {db_error}")
 
         return results
+
+
+def process_document(document_id: str, file_path: str, db: Session):
+    """
+    Synchronous wrapper for process_document_with_graph to work with BackgroundTasks
+    """
+    import asyncio
+    
+    # Create a new event loop if none exists
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No event loop running, create a new one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            process_document_with_graph(document_id, file_path, db)
+        )
+        loop.close()
+        return result
+    else:
+        # Event loop already running, run in executor
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(
+                asyncio.run,
+                process_document_with_graph(document_id, file_path, db)
+            )
+            result = future.result()
+        return result

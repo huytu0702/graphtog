@@ -101,14 +101,19 @@ class QueryService:
                 f"{entity_data.get('description', 'No description')}"
             )
 
-            # Get related entities
-            context = self.get_entity_context(entity_data["id"], hop_limit)
+            # Get related entities if entity has an ID
+            entity_id = entity_data.get("id")
+            if entity_id:
+                try:
+                    context = self.get_entity_context(entity_id, hop_limit)
 
-            if context.get("related_entities"):
-                related_str = ", ".join(
-                    [e["name"] for e in context["related_entities"][:5]]
-                )
-                context_parts.append(f"  Related to: {related_str}")
+                    if context.get("related_entities"):
+                        related_str = ", ".join(
+                            [e["name"] for e in context["related_entities"][:5]]
+                        )
+                        context_parts.append(f"  Related to: {related_str}")
+                except Exception as e:
+                    logger.warning(f"Could not get context for entity {entity_name}: {e}")
 
         return "\n".join(context_parts)
 
@@ -116,6 +121,7 @@ class QueryService:
         self,
         query: str,
         hop_limit: int = 1,
+        document_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a query end-to-end
@@ -123,6 +129,7 @@ class QueryService:
         Args:
             query: User query
             hop_limit: Graph traversal depth
+            document_id: Optional document ID to filter entities
 
         Returns:
             Dict with query results
@@ -130,10 +137,12 @@ class QueryService:
         result = {
             "query": query,
             "status": "error",
+            "query_type": "unknown",
             "entities_found": [],
             "context": "",
             "answer": "",
             "citations": [],
+            "confidence_score": "0.0",
             "error": None,
         }
 
@@ -143,11 +152,15 @@ class QueryService:
             classification = llm_service.classify_query(query)
 
             if classification["status"] != "success":
-                result["error"] = "Failed to classify query"
+                result["error"] = "Failed to classify query: " + classification.get(
+                    "error", "Unknown error"
+                )
+                logger.error(f"Query classification failed: {result['error']}")
                 return result
 
             query_type = classification["classification"].get("type", "EXPLORATORY")
             key_entities = classification["classification"].get("key_entities", [])
+            result["query_type"] = query_type
 
             logger.info(f"Query type: {query_type}, Key entities: {key_entities}")
 
@@ -157,12 +170,37 @@ class QueryService:
                 key_entities = self.extract_query_entities(query)
 
             found_entities = self.find_entities_in_graph(key_entities)
-            result["entities_found"] = list(found_entities.keys())
 
+            # Fallback: If no specific entities found, get top entities from graph
             if not found_entities:
-                result["status"] = "no_entities_found"
-                result["error"] = "No relevant entities found in knowledge graph"
-                return result
+                logger.info(f"No specific entities found, retrieving top entities from graph")
+                # Filter by document_id if provided
+                top_entities_list = graph_service.get_top_entities(
+                    limit=10, document_id=document_id
+                )
+
+                if top_entities_list:
+                    # Convert list to dict format expected by rest of the code
+                    found_entities = {entity["name"]: entity for entity in top_entities_list}
+                    logger.info(
+                        f"Retrieved {len(found_entities)} top entities as fallback"
+                        + (f" from document {document_id}" if document_id else "")
+                    )
+                    logger.debug(
+                        f"Sample entity structure: {list(found_entities.values())[0] if found_entities else 'None'}"
+                    )
+                else:
+                    result["status"] = "no_entities_found"
+                    result["error"] = "No entities found in knowledge graph" + (
+                        f" for document {document_id}" if document_id else ""
+                    )
+                    logger.info(
+                        f"No entities found in graph"
+                        + (f" for document {document_id}" if document_id else "")
+                    )
+                    return result
+
+            result["entities_found"] = list(found_entities.keys())
 
             # Step 3: Build context from entities
             context = self.build_context_from_entities(found_entities, hop_limit)
@@ -177,12 +215,13 @@ class QueryService:
 
             result["answer"] = answer_result.get("answer", "")
             result["citations"] = answer_result.get("citations", [])
+            result["confidence_score"] = answer_result.get("confidence_score", "0.0")
             result["status"] = "success"
 
             logger.info(f"Query processed successfully, found {len(found_entities)} entities")
 
         except Exception as e:
-            logger.error(f"Query processing error: {e}")
+            logger.error(f"Query processing error: {e}", exc_info=True)
             result["error"] = str(e)
 
         return result

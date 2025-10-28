@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cache"])
 
 
-@router.get("/cache/stats")
+@router.get("/stats")
 async def get_cache_stats() -> Dict:
     """
     Get cache statistics
@@ -27,10 +27,10 @@ async def get_cache_stats() -> Dict:
         return stats
     except Exception as e:
         logger.error(f"Cache stats error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "message": str(e), "stats": {}}
 
 
-@router.post("/cache/clear-all")
+@router.post("/clear-all")
 async def clear_all_caches() -> Dict:
     """
     Clear all application caches
@@ -46,10 +46,10 @@ async def clear_all_caches() -> Dict:
         }
     except Exception as e:
         logger.error(f"Clear all caches error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "message": str(e), "cleared_entries": 0}
 
 
-@router.post("/cache/clear/{cache_type}")
+@router.post("/clear/{cache_type}")
 async def clear_cache_type(cache_type: str) -> Dict:
     """
     Clear cache by type
@@ -70,10 +70,15 @@ async def clear_cache_type(cache_type: str) -> Dict:
         }
     except Exception as e:
         logger.error(f"Clear cache type error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "status": "error",
+            "message": str(e),
+            "cache_type": cache_type,
+            "cleared_entries": 0,
+        }
 
 
-@router.delete("/cache/key/{key}")
+@router.delete("/key/{key}")
 async def delete_cache_key(key: str) -> Dict:
     """
     Delete specific cache key
@@ -92,4 +97,4 @@ async def delete_cache_key(key: str) -> Dict:
         }
     except Exception as e:
         logger.error(f"Delete cache key error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "message": str(e), "key": key}

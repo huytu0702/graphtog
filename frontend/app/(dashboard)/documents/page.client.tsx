@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import DocumentUpload from '@/components/document-upload/document-upload';
-import { Button } from '@/components/ui/button';
 import { Session } from 'next-auth';
 
 interface Document {
@@ -21,24 +20,45 @@ export default function DocumentsPageClient({ session }: DocumentsPageClientProp
     const [documents, setDocuments] = useState<Document[]>([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchDocuments();
-    }, []);
+    // Get access token from session
+    const accessToken = (session?.user as any)?.accessToken;
 
-    const fetchDocuments = async () => {
+    const fetchDocuments = useCallback(async () => {
+        if (!accessToken) {
+            setLoading(false);
+            return;
+        }
+
         try {
             setLoading(true);
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/documents`);
-            const data = await response.json();
-            setDocuments(data);
+            const response = await fetch(
+                `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/documents`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`,
+                    },
+                }
+            );
+
+            if (response.ok) {
+                const data = await response.json();
+                setDocuments(data);
+            } else {
+                setDocuments([]);
+                console.error('Error fetching documents:', response.status, response.statusText);
+            }
         } catch (error) {
             console.error('Error fetching documents:', error);
         } finally {
             setLoading(false);
         }
-    };
+    }, [accessToken]);
 
-    const handleUploadSuccess = () => {
+    useEffect(() => {
+        fetchDocuments();
+    }, [fetchDocuments]);
+
+    const handleUploadSuccess = (_file?: File) => {
         fetchDocuments(); // Refresh the document list after upload
     };
 
@@ -48,7 +68,7 @@ export default function DocumentsPageClient({ session }: DocumentsPageClientProp
                 <h1 className="text-2xl font-bold text-gray-900">Your Documents</h1>
 
                 <div className="my-8">
-                    <DocumentUpload onUploadSuccess={handleUploadSuccess} />
+                    <DocumentUpload onUploadSuccess={handleUploadSuccess} accessToken={accessToken} />
                 </div>
 
                 <div className="mt-10">
@@ -68,10 +88,16 @@ export default function DocumentsPageClient({ session }: DocumentsPageClientProp
                                     <div>
                                         <h3 className="font-medium text-gray-900">{doc.filename}</h3>
                                         <p className="text-sm text-gray-500">
-                                            Status: <span className={`font-medium ${doc.status === 'completed' ? 'text-green-600' :
-                                                    doc.status === 'processing' ? 'text-blue-600' :
-                                                        'text-red-600'
-                                                }`}>
+                                            Status:{' '}
+                                            <span
+                                                className={`font-medium ${
+                                                    doc.status === 'completed'
+                                                        ? 'text-green-600'
+                                                        : doc.status === 'processing'
+                                                            ? 'text-blue-600'
+                                                            : 'text-red-600'
+                                                }`}
+                                            >
                                                 {doc.status}
                                             </span>
                                             {doc.error_message && (

@@ -65,11 +65,22 @@ cd graphtog
 ### 2. Setup Environment Variables
 
 ```bash
-# Copy the example configuration
-cp backend/app/config.py .env  # Create .env from config template
+# Create your .env file from the example
+cp .env.example .env
 
-# Edit .env and set your API keys
-# GOOGLE_API_KEY=your-key-here
+# Edit .env and set your API keys, especially:
+# - GOOGLE_API_KEY: Your Google API key for Gemini
+# - NEXTAUTH_SECRET: Generate a secure secret for NextAuth
+```
+
+#### Generate a Secure NEXTAUTH_SECRET
+
+```bash
+# Option 1: Using openssl
+openssl rand -base64 32
+
+# Option 2: Using node
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ### 3. Start Services with Docker Compose

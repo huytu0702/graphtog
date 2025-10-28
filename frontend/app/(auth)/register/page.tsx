@@ -19,15 +19,15 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
     }
-    
+
     setLoading(true);
     setError('');
-    
+
     try {
       // Call the FastAPI backend for registration
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/auth/register`, {
@@ -43,7 +43,7 @@ export default function RegisterPage() {
       });
 
       const data = await res.json();
-      
+
       if (res.ok) {
         // Automatically sign in the user after registration
         const signInRes = await signIn('credentials', {
@@ -51,13 +51,19 @@ export default function RegisterPage() {
           email,
           password,
         });
-        
+
         if (signInRes?.error) {
-          setError('Registration successful, but could not sign in automatically');
+          console.error('Sign-in error after registration:', signInRes.error);
+          setError('Registration successful, but could not sign in automatically. Please try logging in manually.');
           return;
         }
-        
-        router.push('/dashboard');
+
+        if (signInRes?.ok) {
+          router.push('/dashboard');
+        } else {
+          console.error('Unexpected sign-in response:', signInRes);
+          setError('Registration successful, but could not sign in automatically. Please try logging in manually.');
+        }
       } else {
         setError(data.detail || 'Registration failed');
       }
@@ -143,7 +149,7 @@ export default function RegisterPage() {
               {loading ? 'Creating account...' : 'Register'}
             </Button>
           </div>
-          
+
           <div className="text-sm text-center">
             <p>
               Already have an account?{' '}

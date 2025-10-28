@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import HTTPException
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.db.neo4j import close_neo4j, init_neo4j
@@ -84,6 +86,15 @@ app.add_middleware(
 )
 
 
+# Add exception handler for HTTPException
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -127,17 +138,21 @@ from app.api.endpoints import (
     advanced_features,
     visualization,
     cache,
+    retrieval,
+    analyze,
 )
 
 # Include API routes
 app.include_router(auth.router, prefix="/api/auth")
-app.include_router(documents.router, prefix="/api")
-app.include_router(queries.router, prefix="/api")
-app.include_router(admin.router, prefix="/api")
-app.include_router(communities.router, prefix="/api")
-app.include_router(advanced_features.router, prefix="/api")
-app.include_router(visualization.router, prefix="/api")
-app.include_router(cache.router, prefix="/api")
+app.include_router(documents.router, prefix="/api/documents")
+app.include_router(queries.router, prefix="/api/queries")
+app.include_router(admin.router, prefix="/api/admin")
+app.include_router(communities.router, prefix="/api/communities")
+app.include_router(advanced_features.router, prefix="/api/extract")
+app.include_router(visualization.router, prefix="/api/visualize")
+app.include_router(cache.router, prefix="/api/cache")
+app.include_router(retrieval.router, prefix="/api/retrieve")
+app.include_router(analyze.router, prefix="/api/analyze")
 
 
 if __name__ == "__main__":

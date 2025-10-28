@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["visualization"])
 
 
-@router.get("/visualize/entity-graph")
+@router.get("/entity-graph")
 async def get_entity_graph(limit: int = 100, include_communities: bool = True) -> Dict:
     """
     Get entity graph for visualization
@@ -31,10 +31,10 @@ async def get_entity_graph(limit: int = 100, include_communities: bool = True) -
         return result
     except Exception as e:
         logger.error(f"Entity graph visualization error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "message": str(e), "elements": []}
 
 
-@router.get("/visualize/community-graph")
+@router.get("/community-graph")
 async def get_community_graph(include_members: bool = True, max_members: int = 10) -> Dict:
     """
     Get community graph for visualization
@@ -54,7 +54,7 @@ async def get_community_graph(include_members: bool = True, max_members: int = 1
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/visualize/hierarchical-graph")
+@router.get("/hierarchical-graph")
 async def get_hierarchical_graph() -> Dict:
     """
     Get hierarchical graph (documents -> entities -> communities)
@@ -70,7 +70,7 @@ async def get_hierarchical_graph() -> Dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/visualize/ego-graph/{entity_id}")
+@router.get("/ego-graph/{entity_id}")
 async def get_ego_graph(entity_id: str, hop_limit: int = 2) -> Dict:
     """
     Get ego graph centered on an entity

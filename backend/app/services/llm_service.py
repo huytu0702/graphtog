@@ -18,8 +18,11 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# Configure Gemini
-genai.configure(api_key=settings.GOOGLE_API_KEY)
+# Configure Gemini only if API key is provided
+if settings.GOOGLE_API_KEY:
+    genai.configure(api_key=settings.GOOGLE_API_KEY)
+else:
+    logger.warning("GOOGLE_API_KEY not configured. Please set GOOGLE_API_KEY environment variable.")
 
 
 class LLMService:
@@ -27,7 +30,7 @@ class LLMService:
 
     def __init__(self):
         """Initialize LLM service"""
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = "gemini-2.5-flash-lite"
         self.rate_limit_delay = 1.0 / 60  # 60 requests per minute
         self.last_request_time = 0
         self.max_retries = 3
@@ -46,6 +49,14 @@ class LLMService:
             try:
                 return func(*args, **kwargs)
             except Exception as e:
+                error_msg = str(e)
+                # Check if it's an API key error
+                if "API_KEY" in error_msg or "No API_KEY" in error_msg:
+                    logger.error(
+                        f"API key not configured. Please set GOOGLE_API_KEY environment variable. "
+                        f"Get your key from https://ai.google.dev/"
+                    )
+                    raise
                 if attempt == self.max_retries - 1:
                     raise
                 wait_time = self.retry_delay * (2**attempt)

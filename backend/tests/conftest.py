@@ -16,8 +16,7 @@ from app.main import app
 
 # Test database configuration
 SQLALCHEMY_TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql://test_user:test_password@localhost:5432/graphtog_test_db"
+    "TEST_DATABASE_URL", "postgresql://graphtog_user:graphtog_password@localhost:5432/graphtog_db"
 )
 
 engine = create_engine(SQLALCHEMY_TEST_DATABASE_URL)
@@ -27,9 +26,16 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
     """Create test database tables"""
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+        yield
+        # Don't drop tables to preserve data for debugging
+        # Base.metadata.drop_all(bind=engine)
+    except Exception as e:
+        print(f"\n⚠️  Database setup warning: {e}")
+        print(f"   DATABASE_URL: {SQLALCHEMY_TEST_DATABASE_URL}")
+        print("   Make sure PostgreSQL is running via docker-compose")
+        yield
 
 
 @pytest.fixture
@@ -63,7 +69,7 @@ def auth_token(client) -> str:
     user_data = {
         "email": "test@example.com",
         "password": "testpassword123",
-        "full_name": "Test User"
+        "full_name": "Test User",
     }
 
     # Register user
@@ -73,8 +79,7 @@ def auth_token(client) -> str:
 
     # Login
     response = client.post(
-        "/api/auth/login",
-        json={"email": user_data["email"], "password": user_data["password"]}
+        "/api/auth/login", json={"email": user_data["email"], "password": user_data["password"]}
     )
     if response.status_code != 200:
         pytest.skip(f"Could not login: {response.text}")

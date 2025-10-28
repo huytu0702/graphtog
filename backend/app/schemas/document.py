@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 
 class DocumentBase(BaseModel):
@@ -19,8 +20,8 @@ class DocumentUpdate(BaseModel):
 
 
 class DocumentResponse(DocumentBase):
-    id: int
-    user_id: int
+    id: UUID
+    user_id: UUID
     created_at: datetime
     updated_at: datetime
 
