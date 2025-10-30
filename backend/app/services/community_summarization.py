@@ -11,6 +11,7 @@ import google.generativeai as genai
 
 from app.config import get_settings
 from app.db.neo4j import get_neo4j_session
+from app.services.prompt import build_detailed_community_summary_prompt
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -34,19 +35,16 @@ class CommunitySummarizationService:
             self.session = get_neo4j_session()
         return self.session
 
-    def get_community_context(
-        self, community_id: int, max_members: int = 20
-    ) -> Dict[str, Any]:
+    def get_community_context(self, community_id: int, max_members: int = 20) -> Dict[str, Any]:
         """
         Retrieve context for a community
-
         Args:
             community_id: Community ID
             max_members: Max members to include
-
         Returns:
             Dictionary with community context
         """
+
         try:
             session = self.get_session()
 
@@ -61,6 +59,7 @@ class CommunitySummarizationService:
                 type: type(rel),
                 description: rel.description
             }) AS entity_rels
+
             RETURN
                 c.id AS community_id,
                 c.level AS community_level,
@@ -75,10 +74,9 @@ class CommunitySummarizationService:
                 count(DISTINCT e) AS member_count
             """
 
-            result = session.run(query, {
-                "community_id": community_id,
-                "max_members": max_members
-            }).single()
+            result = session.run(
+                query, {"community_id": community_id, "max_members": max_members}
+            ).single()
 
             if result:
                 return {
@@ -87,7 +85,7 @@ class CommunitySummarizationService:
                     "community_level": result.get("community_level", 0),
                     "members": result["members"],
                     "relationships": result["relationships"],
-                    "member_count": result["member_count"]
+                    "member_count": result["member_count"],
                 }
 
             return {"status": "not_found", "community_id": community_id}
@@ -109,6 +107,7 @@ class CommunitySummarizationService:
         Returns:
             Dictionary with summary
         """
+
         try:
             # Get context if not provided
             if not context:
@@ -117,57 +116,49 @@ class CommunitySummarizationService:
             if context.get("status") != "success":
                 return {
                     "status": "error",
-                    "message": f"Could not get context for community {community_id}"
+                    "message": f"Could not get context for community {community_id}",
                 }
 
             # Prepare summary prompt
-            members_text = "\n".join([
-                f"- {m['name']} ({m['type']}): {m.get('description', 'N/A')}"
-                for m in context.get("members", [])[:10]
-            ])
+            members_text = "\n".join(
+                [
+                    f"- {m['name']} ({m['type']}): {m.get('description', 'N/A')}"
+                    for m in context.get("members", [])[:10]
+                ]
+            )
 
-            relationships_text = "\n".join([
-                f"- {r['source']} --{r['type']}--> {r['target']}: {r.get('description', '')}"
-                for r in context.get("relationships", [])[:10]
-                if r.get('source') and r.get('target')
-            ])
+            relationships_text = "\n".join(
+                [
+                    f"- {r['source']} --{r['type']}--> {r['target']}: {r.get('description', '')}"
+                    for r in context.get("relationships", [])[:10]
+                    if r.get("source") and r.get("target")
+                ]
+            )
 
-            prompt = f"""Generate a comprehensive summary of this community in 2-3 sentences:
-
-Community Level: {context.get('community_level', 0)}
-Member Count: {context.get('member_count', 0)}
-
-Key Members:
-{members_text}
-
-Key Relationships:
-{relationships_text}
-
-Provide:
-1. A brief summary of what this community represents
-2. Main themes or topics (3-5 themes)
-3. Significance/importance (high/medium/low)
-
-Format as JSON:
-{{
-    "summary": "...",
-    "themes": ["...", "..."],
-    "significance": "high|medium|low"
-}}
-"""
+            prompt = build_detailed_community_summary_prompt(
+                context.get("community_level", 0),
+                context.get("member_count", 0),
+                members_text,
+                relationships_text,
+            )
 
             model = genai.GenerativeModel(self.model_name)
+
             response = model.generate_content(prompt)
 
             try:
                 result_text = response.text.strip()
+
                 if result_text.startswith("```"):
                     result_text = result_text.split("```")[1]
+
                     if result_text.startswith("json"):
                         result_text = result_text[4:]
+
                     result_text = result_text.strip()
 
                 summary_data = json.loads(result_text)
+
                 return {
                     "status": "success",
                     "community_id": community_id,
@@ -175,8 +166,10 @@ Format as JSON:
                     "themes": summary_data.get("themes", []),
                     "significance": summary_data.get("significance", "medium"),
                 }
+
             except json.JSONDecodeError as e:
                 logger.warning(f"Could not parse summary JSON: {e}")
+
                 # Fallback to raw text
                 return {
                     "status": "success",
@@ -188,6 +181,7 @@ Format as JSON:
 
         except Exception as e:
             logger.error(f"Failed to generate community summary: {str(e)}")
+
             return {"status": "error", "message": str(e)}
 
     def _build_community_context(
@@ -204,8 +198,10 @@ Format as JSON:
         Returns:
             Context string for LLM
         """
+
         context = "Community consisting of the following entities:\n\n"
         context += "ENTITIES:\n"
+
         for entity in entities[:20]:  # Limit to 20 entities
             context += f"- {entity}\n"
 
@@ -213,6 +209,7 @@ Format as JSON:
             context += f"- ... and {len(entities) - 20} more entities\n"
 
         context += "\nKEY RELATIONSHIPS:\n"
+
         for rel in relationships[:15]:  # Limit to 15 relationships
             context += f"- {rel['source']} [{rel['type']}] {rel['target']}"
             if rel.get("description"):
@@ -221,18 +218,17 @@ Format as JSON:
 
         if len(relationships) > 15:
             context += f"- ... and {len(relationships) - 15} more relationships\n"
-
         return context
 
     def _store_community_summary(self, session, community_id: int, summary: Dict[str, Any]) -> None:
         """
         Store community summary in Neo4j
-
         Args:
             session: Neo4j session
             community_id: Community ID
             summary: Summary dictionary
         """
+
         try:
             query = """
             MATCH (c:Community {id: $community_id})
@@ -263,11 +259,12 @@ Format as JSON:
         Returns:
             Dictionary with all community summaries
         """
+
         try:
             session = self.get_session()
-
             # Get all communities
             query = "MATCH (c:Community) RETURN c.id AS community_id ORDER BY c.id"
+
             communities = session.run(query).data()
 
             if not communities:
@@ -278,30 +275,32 @@ Format as JSON:
 
             summaries = {}
             failed = 0
+
             for record in communities:
                 community_id = record["community_id"]
-                
+
                 # Get context and generate summary
                 context = self.get_community_context(community_id)
+
                 if context.get("status") == "success":
                     result = self.generate_community_summary(community_id, context)
-                    
+
                     if result["status"] == "success":
                         # Store summary in Neo4j
-                        self._store_community_summary(
-                            session,
-                            community_id,
-                            result
-                        )
+                        self._store_community_summary(session, community_id, result)
+
                         summaries[community_id] = result
+
                     else:
                         failed += 1
                         logger.warning(f"Failed to generate summary for community {community_id}")
+
                 else:
                     failed += 1
                     logger.warning(f"Failed to get context for community {community_id}")
 
             logger.info(f"Summarized {len(summaries)} communities ({failed} failed)")
+
             return {
                 "status": "success",
                 "num_communities_summarized": len(summaries),
@@ -311,6 +310,7 @@ Format as JSON:
 
         except Exception as e:
             logger.error(f"Failed to summarize all communities: {str(e)}")
+
             return {"status": "error", "message": str(e)}
 
     def get_community_summary(self, community_id: int) -> Dict[str, Any]:
@@ -323,6 +323,7 @@ Format as JSON:
         Returns:
             Dictionary with community summary
         """
+
         try:
             session = self.get_session()
 
@@ -350,6 +351,7 @@ Format as JSON:
 
         except Exception as e:
             logger.error(f"Failed to get community summary: {str(e)}")
+
             return {"status": "error", "message": str(e)}
 
     def compare_communities(self, community_id_1: int, community_id_2: int) -> Dict[str, Any]:
@@ -363,6 +365,7 @@ Format as JSON:
         Returns:
             Dictionary with community comparison
         """
+
         try:
             session = self.get_session()
 
@@ -411,6 +414,7 @@ Format as JSON:
 
         except Exception as e:
             logger.error(f"Failed to compare communities: {str(e)}")
+
             return {"status": "error", "message": str(e)}
 
 

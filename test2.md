@@ -79,7 +79,7 @@ i) **Định kỳ rà soát, điều chỉnh, cập nhật đề án, kế hoạ
 
 1. **Tuân thủ quy định pháp luật** và phù hợp định hướng quốc gia. Mọi hoạt động phát triển đô thị thông minh phải tuân thủ quy định pháp luật, thông nhất và thúc đẩy việc thực hiện các chiến lược, quy hoạch, kế hoạch phát triển quốc gia, vùng, địa phương và các chương trình, đề án quốc gia về khoa học, công nghệ, đổi mới sáng tạo, chuyển đổi số, phát triển đô thị.
 
-2. **Phát triển đô thị thông minh phải lấy người dân làm trung tâm.** Các hoạt động phát triển đô thị thông minh hướng tới mục tiêu cải thiện chất lượng sống, tối ưu hóa các dịch vụ, tiện ích phục vụ người dân; tạo điều kiện cho người dân tham gia trong quá trình quản lý, vận hành, giám sát phát triển đô thị thông minh. Hạ tầng và dịch vụ số của đô thị thông minh phải chú trọng yêu cầu về công bằng số, giảm thiểu khoảng cách số.
+2. **Phát triển đô thị thông minh phải lấy người dân làm trung tâm.** Các hoạt động phát triển đô thị quốc phòng an ninh minh hướng tới mục tiêu cải thiện chất lượng sống, tối ưu hóa các dịch vụ, tiện ích phục vụ người dân; tạo điều kiện cho người dân tham gia trong quá trình quản lý, vận hành, giám sát phát triển đô thị thông minh. Hạ tầng và dịch vụ số của đô thị thông minh phải chú trọng yêu cầu về công bằng số, giảm thiểu khoảng cách số.
 
 3. **Phát triển và vận hành đô thị thông minh trên cơ sở dữ liệu đô thị** là tài nguyên cốt lõi. Dữ liệu đô thị thông minh phải được quản lý theo một vòng đời hoàn chỉnh, bảo đảm kết nối, chia sẻ, an toàn và được sử dụng làm cơ sở cho việc ra quyết định.
 
@@ -90,47 +90,3 @@ i) **Định kỳ rà soát, điều chỉnh, cập nhật đề án, kế hoạ
 6. **Phát triển bền vững và huy động đa dạng nguồn lực.** Phát triển hài hòa các mục tiêu phát triển đô thị bảo đảm chất lượng, thông minh, kết nối, hiệu quả, bền vững. Giảm thiểu tác động môi trường từ công nghệ, tối ưu hóa năng lượng cho Trung tâm dữ liệu, thúc đẩy kinh tế tuần hoàn dữ liệu. Huy động và sử dụng hiệu quả mọi nguồn lực hợp pháp từ nhà nước, doanh nghiệp, xã hội và công đồng dân cư, thúc đẩy hợp tác công tư trong phát triển đô thị thông minh.
 
 ---
-
-## CHƯƠNG II - ĐỊNH HƯỚNG, ĐỀ ÁN, KẾ HOẠCH PHÁT TRIỂN ĐÔ THỊ THÔNG MINH VÀ QUY HOẠCH ĐÔ THỊ THÔNG MINH
-
-### MỤC 1 - ĐỊNH HƯỚNG, ĐỀ ÁN VÀ KẾ HOẠCH PHÁT TRIỂN ĐÔ THỊ THÔNG MINH
-
-#### Điều 5. Định hướng phát triển đô thị thông minh
-
-1. Định hướng phát triển đô thị thông minh quốc gia phải phù hợp với chủ trương của Đảng về phát triển đô thị, khoa học, công nghệ, đổi mới sáng tạo và chuyển đổi số; tuân thủ pháp luật của Nhà nước và thông nhất với các định hướng, chiến lược, quy hoạch, kế hoạch phát triển kinh tế - xã hội của quốc gia, các ngành và vùng; đáp ứng các yêu cầu quy định tại Điều 4 Nghị định này.
-
-2. Nội dung định hướng phát triển đô thị thông minh quốc gia phải xác định rõ các mục tiêu, quan điểm, nhiệm vụ, giải pháp chủ yếu; các lĩnh vực đô thị thông minh ưu tiên phát triển về ý tế, chăm sóc sức khỏe, quản lý môi trường, nước thải, rác thải, cấp nước, giao thông và các lĩnh vực khác cần tập trung triển khai theo từng giai đoạn; các mô hình theo đặc thù phát triển đô thị; các khu vực, dự án, cơ chế, mô hình quản lý ưu tiên thí điểm cấp quốc gia; lộ trình và các cơ chế chính sách triển khai, giám sát thực hiện, trong đó bao gồm bộ chỉ số đánh giá hiệu quả thực hiện.
-
-3. Bộ Xây dựng chủ trì, phối hợp với Bộ Khoa học và Công nghệ, Bộ Công an và các bộ, ngành có liên quan, chuyên gia tư vấn xây dựng, trình Thủ tướng Chính phủ phê duyệt định hướng phát triển đô thị thông minh quốc gia cho từng giai đoạn 05 năm, tầm nhìn 10 năm và điều chỉnh, cập nhật khi có thay đổi lớn về công nghệ, chính sách quốc gia hoặc xu hướng phát triển quốc tế.
-
-4. Ủy ban nhân dân cấp tỉnh rà soát, lồng ghép định hướng phát triển đô thị thông minh cấp tỉnh đồng bộ với kế hoạch hành động của tỉnh thực hiện chủ trương về đột phá phát triển khoa học, công nghệ, đổi mới sáng tạo và chuyển đổi số quốc gia.
-
-#### Điều 6. Đề án phát triển đô thị thông minh tỉnh, thành phố
-
-1. Ủy ban nhân dân cấp tỉnh tổ chức lập, phê duyệt và triển khai đề án phát triển đô thị thông minh của địa phương, bảo đảm phù hợp với định hướng phát triển đô thị thông minh quốc gia, đáp ứng các yêu cầu chung phát triển đô thị thông minh quy định tại Điều 4 Nghị định này.
-
-2. Nội dung đề án phát triển đô thị thông minh tỉnh, thành phố phải đáp ứng các yêu cầu cơ bản sau:
-
-a) **Phân tích, đánh giá hiện trạng**, xác định rõ các vấn đề, thách thức và yêu cầu của đô thị cần được đáp ứng trong ngắn hạn và dài hạn; các vấn đề liên ngành quản trị tích hợp;
-
-b) **Xác định rõ tầm nhìn, mục tiêu tổng quát, mục tiêu cụ thể**, cấp độ trưởng thành dự kiến đạt được theo từng giai đoạn;
-
-c) **Xác định rõ các nhiệm vụ, giải pháp, thời gian thực hiện, sản phẩm đầu ra** bao gồm các nhóm nhiệm vụ triển khai chung trên toàn tỉnh, thành phố và các nhóm nhiệm vụ lựa chọn ưu tiên để thực hiện các yêu cầu quy định tại Điều 4 Nghị định này;
-
-Đề xuất các nhiệm vụ, giải pháp và danh mục dự án được lựa chọn ưu tiên thực hiện theo lĩnh vực, khu vực và từng giai đoạn, bao gồm dự án sử dụng vốn ngân sách nhà nước, dự án kêu gọi đầu tư xã hội hóa, hợp tác công tư, cho thuê dịch vụ và khu vực áp dụng thử nghiệm có kiểm soát, khu vực ưu đãi đầu tư;
-
-d) **Xác định các nội dung cần liên kết, tích hợp với chương trình, đề án chuyển đổi số**, chương trình, kế hoạch phát triển đô thị và các chương trình liên quan khác của địa phương để bảo đảm tính đồng bộ, tránh chồng chéo, lãng phí;
-
-Xác định các đề án thành phần (nếu có) và nhiệm vụ xây dựng các kế hoạch cụ thể để triển khai đề án theo ngành, lĩnh vực, khu vực bao gồm cả kế hoạch phát triển đô thị thông minh cho các đơn vị hành chính cấp dưới khi cần thiết, các nhiệm vụ do cấp tỉnh sẽ thực hiện trên địa bàn cấp xã, liên phường - xã hoặc các nhiệm vụ do cấp xã tự thực hiện;
-
-đ) **Xây dựng mô hình quản trị dữ liệu đô thị**, đánh giá tác động đối với dữ liệu cá nhân;
-
-e) **Xây dựng phương án bảo đảm bền vững về tài chính**, trong đó phải dự báo và có kế hoạch cân đối nguồn lực cho cả chi phí đầu tư và chi phí vận hành, bảo trì, nâng cấp trong dài hạn;
-
-g) **Xác định mô hình tổ chức thực hiện, trách nhiệm của các sở, ngành và các bên liên quan**, cơ chế phối hợp;
-
-h) **Báo cáo đánh giá tác động tổng hợp;**
-
-i) **Xây dựng cơ chế giám sát, báo cáo, xây dựng bộ chỉ số đánh giá kết quả và tác động**, quy trình theo dõi tiến độ, công khai kết quả định kỳ.
-
-3. Đề án phát triển đô thị thông minh tỉnh, thành phố là một hợp phần thuộc chương trình, đề án tổng thể về phát triển khoa học, công nghệ, đổi mới sáng tạo và chuyển đổi số của tỉnh, thành phố.

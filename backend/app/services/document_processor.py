@@ -4,9 +4,7 @@ Handles document parsing, chunking, entity extraction, and graph building
 """
 
 import asyncio
-import hashlib
 import logging
-import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -17,6 +15,7 @@ from app.models.document import Document
 from app.services.chunking import chunking_service
 from app.services.community_detection import community_detection_service
 from app.services.community_summarization import community_summarization_service
+from app.services.embedding_service import embedding_service
 from app.services.graph_service import graph_service
 from app.services.llm_service import llm_service
 
@@ -119,6 +118,7 @@ async def process_document_with_graph(
         "document_id": document_id,
         "status": "error",
         "chunks_created": 0,
+        "embeddings_generated": 0,
         "entities_extracted": 0,
         "relationships_extracted": 0,
         "communities_detected": 0,
@@ -176,12 +176,13 @@ async def process_document_with_graph(
         results["chunks_created"] = len(chunks)
         logger.info(f"Created {len(chunks)} chunks")
 
-        # Step 5: Create TextUnit nodes and extract entities
-        logger.info("Step 5: Processing chunks for entity extraction...")
+        # Step 5: Create TextUnit nodes in the knowledge graph
+        logger.info("Step 5: Creating TextUnit nodes...")
         if update_callback:
             await update_callback("extraction", 40)
 
         chunk_data = []
+        chunk_metadata: List[Dict[str, object]] = []
         for i, (chunk_text, start_char, end_char) in enumerate(chunks):
             chunk_id = f"{document_id}_chunk_{i}"
 
@@ -195,9 +196,37 @@ async def process_document_with_graph(
             )
 
             chunk_data.append((chunk_text, chunk_id))
+            chunk_metadata.append(
+                {
+                    "chunk_id": chunk_id,
+                    "text": chunk_text,
+                    "start_char": start_char,
+                    "end_char": end_char,
+                }
+            )
 
-        # Step 6: Batch extract entities from all chunks
-        logger.info("Step 6: Extracting entities from chunks...")
+        # Step 6: Generate and store embeddings with pgvector
+        logger.info("Step 6: Generating Gemini embeddings for chunks...")
+        if update_callback:
+            await update_callback("embeddings", 45)
+
+        try:
+            embedding_stats = await embedding_service.generate_and_store_embeddings(
+                db,
+                document_id=document_id,
+                chunks=chunk_metadata,
+            )
+            results["embeddings_generated"] = embedding_stats.get("embedded", 0)
+            logger.info(
+                "Stored %s embeddings (skipped %s)",
+                embedding_stats.get("embedded", 0),
+                embedding_stats.get("skipped", 0),
+            )
+        except Exception as embed_error:
+            logger.error("Embedding storage failed: %s", embed_error)
+
+        # Step 7: Batch extract entities from all chunks
+        logger.info("Step 7: Extracting entities from chunks...")
         entity_results = await llm_service.batch_extract_entities(chunk_data)
 
         all_entities_by_chunk = {}
@@ -223,8 +252,8 @@ async def process_document_with_graph(
                             textunit_id=chunk_id,
                         )
 
-        # Step 7: Extract relationships
-        logger.info("Step 7: Extracting relationships...")
+        # Step 8: Extract relationships
+        logger.info("Step 8: Extracting relationships...")
         if update_callback:
             await update_callback("relationship_extraction", 70)
 
@@ -256,11 +285,11 @@ async def process_document_with_graph(
                         )
                         results["relationships_extracted"] += 1
 
-        # Step 8: Community detection using Leiden algorithm
-        logger.info("Step 8: Detecting communities with Leiden algorithm...")
+        # Step 9: Community detection using Leiden algorithm
+        logger.info("Step 9: Detecting communities with Leiden algorithm...")
         if update_callback:
             await update_callback("community_detection", 75)
-        
+
         # Initialize and run community detection
         community_results = community_detection_service.detect_communities(
             seed=42,
@@ -276,12 +305,12 @@ async def process_document_with_graph(
         else:
             logger.warning(f"⚠️ Community detection had issues: {community_results.get('message', 'Unknown')}")
             results["communities_detected"] = 0
-        
-        # Step 9: Generate community summaries
-        logger.info("Step 9: Generating community summaries...")
+
+        # Step 10: Generate community summaries
+        logger.info("Step 10: Generating community summaries...")
         if update_callback:
             await update_callback("summarization", 85)
-        
+
         # Generate summaries for all detected communities
         summary_results = community_summarization_service.summarize_all_communities()
         if summary_results["status"] == "success":
@@ -292,8 +321,8 @@ async def process_document_with_graph(
             logger.warning(f"⚠️ Community summarization had issues: {summary_results.get('message', 'Unknown')}")
             results["communities_summarized"] = 0
 
-        # Step 10: Update document status
-        logger.info("Step 10: Finalizing processing...")
+        # Step 11: Update document status
+        logger.info("Step 11: Finalizing processing...")
         if update_callback:
             await update_callback("finalization", 95)
 

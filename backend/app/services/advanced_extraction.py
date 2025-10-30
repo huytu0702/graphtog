@@ -10,6 +10,14 @@ import google.generativeai as genai
 
 from app.config import get_settings
 from app.db.neo4j import get_neo4j_session
+from app.services.prompt import (
+    FEW_SHOT_EXAMPLES,
+    build_attribute_extraction_prompt,
+    build_coreference_prompt,
+    build_event_extraction_prompt,
+    build_few_shot_entity_prompt,
+    build_multi_perspective_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,28 +32,7 @@ class AdvancedExtractionService:
         """Initialize advanced extraction service"""
         self.session = None
         self.model_name = "gemini-2.5-flash"
-
-        # Few-shot examples for extraction
-        self.few_shot_examples = {
-            "entity": """
-Examples of entity extraction:
-1. Text: "Apple Inc. was founded by Steve Jobs in 1976."
-   Output: [{"name": "Apple Inc.", "type": "ORGANIZATION", "context": "Founded company"}, 
-            {"name": "Steve Jobs", "type": "PERSON", "context": "Founder"}]
-
-2. Text: "The Python programming language was created by Guido van Rossum."
-   Output: [{"name": "Python", "type": "PRODUCT", "context": "Programming language"},
-            {"name": "Guido van Rossum", "type": "PERSON", "context": "Creator"}]
-""",
-            "relationship": """
-Examples of relationship extraction:
-1. Text: "Microsoft acquired LinkedIn for $26.2 billion in 2016."
-   Output: [{"source": "Microsoft", "target": "LinkedIn", "type": "ACQUIRED", "description": "Microsoft acquired LinkedIn for $26.2 billion"}]
-
-2. Text: "OpenAI developed GPT-3, an advanced language model."
-   Output: [{"source": "OpenAI", "target": "GPT-3", "type": "DEVELOPED", "description": "OpenAI developed GPT-3"}]
-""",
-        }
+        self.few_shot_examples = FEW_SHOT_EXAMPLES
 
     def get_session(self):
         """Get or create Neo4j session"""
@@ -73,17 +60,11 @@ Examples of relationship extraction:
                 else "PERSON, ORGANIZATION, LOCATION, CONCEPT, EVENT, PRODUCT, OTHER"
             )
 
-            prompt = f"""{self.few_shot_examples['entity']}
-
-Now extract entities from the following text. Only extract the specified entity types: {entity_types_str}
-
-Text: "{text}"
-
-Return a JSON array with entities in this format:
-[{{"name": "...", "type": "...", "context": "..."}}]
-
-Only return valid JSON, no additional text.
-"""
+            prompt = build_few_shot_entity_prompt(
+                text,
+                entity_types_str,
+                self.few_shot_examples["entity"],
+            )
 
             model = genai.GenerativeModel(self.model_name)
             response = model.generate_content(prompt)
@@ -121,21 +102,7 @@ Only return valid JSON, no additional text.
             Dictionary with coreference resolutions
         """
         try:
-            prompt = f"""Identify and resolve coreferences (pronouns, aliases, etc.) in the following text.
-For each pronoun or reference, identify which entity it refers to.
-
-Text: "{text}"
-
-Return a JSON object with coreference resolutions:
-{{
-    "coreferences": [
-        {{"mention": "...", "referent": "...", "type": "pronoun|alias|abbreviation"}}
-    ],
-    "entities": ["..."] // list of main entities
-}}
-
-Only return valid JSON.
-"""
+            prompt = build_coreference_prompt(text)
 
             model = genai.GenerativeModel(self.model_name)
             response = model.generate_content(prompt)
@@ -174,24 +141,7 @@ Only return valid JSON.
             Dictionary with entity attributes
         """
         try:
-            prompt = f"""Extract all attributes, properties, and characteristics of the entity "{entity_name}" from the following text:
-
-Text: "{text}"
-
-Return a JSON object:
-{{
-    "entity": "{entity_name}",
-    "attributes": {{
-        "description": "...",
-        "properties": ["..."],
-        "relationships": ["..."],
-        "roles": ["..."],
-        "characteristics": ["..."]
-    }}
-}}
-
-Only return valid JSON.
-"""
+            prompt = build_attribute_extraction_prompt(entity_name, text)
 
             model = genai.GenerativeModel(self.model_name)
             response = model.generate_content(prompt)
@@ -229,26 +179,7 @@ Only return valid JSON.
             Dictionary with extracted events
         """
         try:
-            prompt = f"""Extract all events, actions, and temporal information from the following text:
-
-Text: "{text}"
-
-Return a JSON object:
-{{
-    "events": [
-        {{
-            "event": "...",
-            "participants": ["..."],
-            "date": "...",
-            "location": "...",
-            "description": "...",
-            "importance": "high|medium|low"
-        }}
-    ]
-}}
-
-Only return valid JSON.
-"""
+            prompt = build_event_extraction_prompt(text)
 
             model = genai.GenerativeModel(self.model_name)
             response = model.generate_content(prompt)
@@ -292,28 +223,7 @@ Only return valid JSON.
             if perspectives is None:
                 perspectives = ["technical", "business", "social", "ethical"]
 
-            prompt = f"""Generate answers to the following query from different perspectives:
-
-Query: "{query}"
-
-Context: "{context}"
-
-Perspectives to consider: {", ".join(perspectives)}
-
-Return a JSON object:
-{{
-    "query": "{query}",
-    "perspectives": {{
-        "technical": {{"answer": "...", "confidence": 0.0-1.0}},
-        "business": {{"answer": "...", "confidence": 0.0-1.0}},
-        "social": {{"answer": "...", "confidence": 0.0-1.0}},
-        "ethical": {{"answer": "...", "confidence": 0.0-1.0}}
-    }},
-    "synthesis": "..."
-}}
-
-Only return valid JSON.
-"""
+            prompt = build_multi_perspective_prompt(query, context, perspectives)
 
             model = genai.GenerativeModel(self.model_name)
             response = model.generate_content(prompt)

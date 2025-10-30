@@ -42,6 +42,11 @@ class Document(Base):
     # Relationships
     user = relationship("User", back_populates="documents")
     queries = relationship("Query", back_populates="document")
+    embeddings = relationship(
+        "TextEmbedding",
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Document(id={self.id}, filename={self.filename}, status={self.status})>"

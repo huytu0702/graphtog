@@ -12,6 +12,9 @@ interface QueryResult {
   entities_found: string[];
   status: string;
   error?: string;
+  context?: string;
+  metadata?: Record<string, unknown>;
+  reasoning_steps?: { step: string; detail?: string }[];
 }
 
 interface Document {
@@ -36,6 +39,18 @@ export default function QueryInterface({ accessToken, documents = [] }: QueryInt
   if (completedDocs.length > 0 && selectedDocumentId === null) {
     setSelectedDocumentId(completedDocs[0].id);
   }
+
+  const formatLabel = (key: string) =>
+    key
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  const formatValue = (value: unknown): string => {
+    if (value === null || value === undefined) return '—';
+    if (Array.isArray(value)) return value.length ? value.join(', ') : '—';
+    if (typeof value === 'object') return JSON.stringify(value, null, 2);
+    return String(value);
+  };
 
   const handleQuerySubmit = async () => {
     if (!query.trim()) return;
@@ -73,7 +88,9 @@ export default function QueryInterface({ accessToken, documents = [] }: QueryInt
           citations: [],
           entities_found: [],
           status: 'error',
-          error: data.detail || 'An error occurred'
+          error: data.detail || 'An error occurred',
+          metadata: {},
+          reasoning_steps: [],
         });
       }
     } catch (error) {
@@ -84,7 +101,9 @@ export default function QueryInterface({ accessToken, documents = [] }: QueryInt
         citations: [],
         entities_found: [],
         status: 'error',
-        error: 'Failed to connect to the server'
+        error: 'Failed to connect to the server',
+        metadata: {},
+        reasoning_steps: [],
       });
     } finally {
       setLoading(false);
@@ -167,6 +186,36 @@ export default function QueryInterface({ accessToken, documents = [] }: QueryInt
                         </span>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {result.metadata && Object.keys(result.metadata).length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700">Metadata:</p>
+                    <dl className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                      {Object.entries(result.metadata).map(([key, value]) => (
+                        <div key={key} className="flex flex-col">
+                          <dt className="font-medium text-gray-600">{formatLabel(key)}</dt>
+                          <dd className="text-gray-900 whitespace-pre-wrap break-words">
+                            {formatValue(value)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                )}
+
+                {result.reasoning_steps && result.reasoning_steps.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700">Reasoning Steps:</p>
+                    <ol className="mt-1 list-decimal list-inside space-y-1 text-sm text-gray-700">
+                      {result.reasoning_steps.map((step, index) => (
+                        <li key={index}>
+                          <span className="font-medium">{formatLabel(step.step)}</span>
+                          {step.detail ? `: ${step.detail}` : null}
+                        </li>
+                      ))}
+                    </ol>
                   </div>
                 )}
 

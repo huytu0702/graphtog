@@ -2,9 +2,10 @@
 PostgreSQL database connection and session management
 """
 
+import logging
 from typing import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -19,6 +20,7 @@ class Base(DeclarativeBase):
 
 # Get settings
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 # Create database engine with connection pooling
 engine = create_engine(
@@ -53,8 +55,17 @@ def init_db() -> None:
     """Initialize database by creating all tables"""
     # Import all models to register them with the Base
     from app.models.document import Document  # noqa: F401
+    from app.models.embedding import TextEmbedding  # noqa: F401
     from app.models.query import Query  # noqa: F401
     from app.models.user import User  # noqa: F401
+
+    # Ensure pgvector extension is available
+    with engine.connect() as connection:
+        try:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            connection.commit()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("pgvector extension initialization failed: %s", exc)
 
     # Create all tables
     Base.metadata.create_all(bind=engine)

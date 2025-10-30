@@ -13,9 +13,16 @@ import google.generativeai as genai
 from google.api_core import retry
 
 from app.config import get_settings
+from app.services.prompt import (
+    build_community_summary_prompt,
+    build_contextual_answer_prompt,
+    build_entity_extraction_prompt,
+    build_graph_community_summary_prompt,
+    build_query_classification_prompt,
+    build_relationship_extraction_prompt,
+)
 
 logger = logging.getLogger(__name__)
-
 settings = get_settings()
 
 # Configure Gemini only if API key is provided
@@ -74,7 +81,6 @@ class LLMService:
             return json.loads(response)
         except json.JSONDecodeError:
             pass
-
         # Try removing markdown code blocks
         if response.startswith("```"):
             lines = response.split("\n")
@@ -90,35 +96,19 @@ class LLMService:
                     return json.loads("\n".join(json_lines))
                 except json.JSONDecodeError:
                     pass
-
         logger.error(f"Failed to parse response as JSON: {response[:200]}")
         return {}
 
     def extract_entities(self, text: str, chunk_id: str) -> Dict[str, Any]:
         """
         Extract entities from text using Gemini
-
         Args:
             text: Text to extract entities from
             chunk_id: Identifier for the text chunk
-
         Returns:
             Dict with extracted entities
         """
-        prompt = f"""Extract entities from the following text. For each entity, provide:
-- name: The entity name
-- type: One of PERSON, ORGANIZATION, LOCATION, CONCEPT, EVENT, PRODUCT, OTHER
-- description: 1-2 sentence description
-- confidence: 0.0-1.0 confidence score
-
-Return as JSON array:
-[{{"name": "...", "type": "...", "description": "...", "confidence": ...}}, ...]
-
-TEXT:
-{text}
-
-JSON:"""
-
+        prompt = build_entity_extraction_prompt(text)
         self._apply_rate_limit()
 
         def call_llm():
@@ -127,7 +117,6 @@ JSON:"""
             return response.text
 
         response_text = self._retry_with_backoff(call_llm)
-
         try:
             entities = self._parse_json_response(response_text)
             if isinstance(entities, dict):
@@ -151,35 +140,15 @@ JSON:"""
     ) -> Dict[str, Any]:
         """
         Extract relationships between entities
-
         Args:
             text: Original text
             entities: Extracted entities
             chunk_id: Identifier for the text chunk
-
         Returns:
             Dict with extracted relationships
         """
         entity_names = [e["name"] for e in entities]
-
-        prompt = f"""Extract relationships between entities in the text.
-Relationships should be between entities from this list: {entity_names}
-
-For each relationship, provide:
-- source: Source entity name
-- target: Target entity name
-- type: One of RELATED_TO, MENTIONS, CAUSES, PRECEDES, OPPOSES, SUPPORTS, CONTAINS, PART_OF
-- description: 1-2 sentence description
-- confidence: 0.0-1.0 confidence score
-
-Return as JSON array:
-[{{"source": "...", "target": "...", "type": "...", "description": "...", "confidence": ...}}, ...]
-
-TEXT:
-{text}
-
-JSON:"""
-
+        prompt = build_relationship_extraction_prompt(text, entity_names)
         self._apply_rate_limit()
 
         def call_llm():
@@ -188,7 +157,6 @@ JSON:"""
             return response.text
 
         response_text = self._retry_with_backoff(call_llm)
-
         try:
             relationships = self._parse_json_response(response_text)
             if isinstance(relationships, dict):
@@ -210,10 +178,8 @@ JSON:"""
     async def batch_extract_entities(self, chunks: List[Tuple[str, str]]) -> List[Dict[str, Any]]:
         """
         Batch extract entities from multiple chunks
-
         Args:
             chunks: List of (text, chunk_id) tuples
-
         Returns:
             List of extraction results
         """
@@ -230,10 +196,8 @@ JSON:"""
     ) -> List[Dict[str, Any]]:
         """
         Batch extract relationships from multiple chunks
-
         Args:
             chunks_with_entities: List of (text, entities, chunk_id) tuples
-
         Returns:
             List of extraction results
         """
@@ -248,23 +212,12 @@ JSON:"""
     def classify_query(self, query: str) -> Dict[str, Any]:
         """
         Classify query type for intelligent retrieval routing
-
         Args:
             query: User query
-
         Returns:
             Dict with query classification
         """
-        prompt = f"""Classify this query type. Return JSON with:
-- type: One of FACTUAL, ANALYTICAL, EXPLORATORY, COMPARISON
-- reasoning: Brief explanation
-- key_entities: List of likely key entities to search for
-- suggested_depth: Number from 1-3 (1=local/simple, 2=community, 3=global/complex)
-
-QUERY: {query}
-
-JSON:"""
-
+        prompt = build_query_classification_prompt(query)
         self._apply_rate_limit()
 
         def call_llm():
@@ -273,7 +226,6 @@ JSON:"""
             return response.text
 
         response_text = self._retry_with_backoff(call_llm)
-
         try:
             classification = self._parse_json_response(response_text)
             return {
@@ -297,29 +249,14 @@ JSON:"""
     ) -> Dict[str, Any]:
         """
         Generate answer based on query and retrieved context
-
         Args:
             query: User query
             context: Retrieved context from graph
             citations: List of source citations
-
         Returns:
             Dict with generated answer
         """
-        citations_text = (
-            f"\n\nCitations:\n" + "\n".join([f"- {c}" for c in citations]) if citations else ""
-        )
-
-        prompt = f"""Answer the following question based on the provided context.
-Be concise and accurate. If the context doesn't contain enough information, say so.
-
-QUESTION: {query}
-
-CONTEXT:
-{context}{citations_text}
-
-ANSWER:"""
-
+        prompt = build_contextual_answer_prompt(query, context, citations)
         self._apply_rate_limit()
 
         def call_llm():
@@ -328,7 +265,6 @@ ANSWER:"""
             return response.text
 
         response_text = self._retry_with_backoff(call_llm)
-
         return {
             "query": query,
             "answer": response_text.strip(),
@@ -344,27 +280,14 @@ ANSWER:"""
     ) -> Dict[str, Any]:
         """
         Generate summary for a community of entities
-
         Args:
             entity_names: List of entity names in community
             relationships_desc: Description of relationships
             sample_text: Sample text chunks related to community
-
         Returns:
             Dict with community summary
         """
-        prompt = f"""Create a concise summary (2-3 sentences) of this community of related entities.
-
-ENTITIES: {", ".join(entity_names)}
-
-RELATIONSHIPS:
-{relationships_desc}
-
-SAMPLE TEXT:
-{sample_text}
-
-SUMMARY:"""
-
+        prompt = build_community_summary_prompt(entity_names, relationships_desc, sample_text)
         self._apply_rate_limit()
 
         def call_llm():
@@ -373,7 +296,6 @@ SUMMARY:"""
             return response.text
 
         response_text = self._retry_with_backoff(call_llm)
-
         return {
             "summary": response_text.strip(),
             "status": "success",
@@ -382,36 +304,16 @@ SUMMARY:"""
     def generate_community_summary(self, context: str) -> Dict[str, Any]:
         """
         Generate summary for a community
-
         Args:
             context: Community context with entities and relationships
-
         Returns:
             Dictionary with summary and themes
         """
         try:
             self._apply_rate_limit()
-
-            prompt = f"""Based on the following community of entities and their relationships, generate a concise summary:
-
-{context}
-
-Provide:
-1. A brief summary (2-3 sentences) of what this community represents
-2. Key themes (list 3-5 main themes)
-3. Main focus area (one line)
-
-Format your response as JSON:
-{{
-    "summary": "...",
-    "themes": ["theme1", "theme2", "..."],
-    "focus_area": "..."
-}}
-"""
-
+            prompt = build_graph_community_summary_prompt(context)
             model = genai.GenerativeModel(self.model_name)
             response = model.generate_content(prompt)
-
             # Extract JSON from response
             try:
                 result_text = response.text.strip()
@@ -420,7 +322,6 @@ Format your response as JSON:
                     result_text = result_text[7:]
                 if result_text.endswith("```"):
                     result_text = result_text[:-3]
-
                 result = json.loads(result_text)
                 logger.info("Community summary generated successfully")
                 return result
@@ -431,7 +332,6 @@ Format your response as JSON:
                     "themes": [],
                     "focus_area": "Unknown",
                 }
-
         except Exception as e:
             logger.error(f"Community summary generation failed: {str(e)}")
             return {

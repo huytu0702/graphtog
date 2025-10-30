@@ -84,7 +84,7 @@ class QueryService:
         entities: Dict[str, Any],
         hop_limit: int = 1,
         include_text: bool = True,
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
         Build contextual information from entities following Microsoft GraphRAG methodology
         
@@ -97,10 +97,11 @@ class QueryService:
             include_text: Whether to include text units (strongly recommended per GraphRAG)
 
         Returns:
-            Formatted context string with entity info and actual document text
+            Dict with context string and supporting metadata
         """
         context_parts = []
         text_units_seen = set()  # Avoid duplicate text chunks
+        related_entities_total = 0
 
         for entity_name, entity_data in entities.items():
             # Add entity metadata
@@ -119,6 +120,7 @@ class QueryService:
                     # Add related entities
                     if context.get("related_entities"):
                         related_entities = context["related_entities"][:5]
+                        related_entities_total += len(related_entities)
                         related_info = []
                         for rel_ent in related_entities:
                             rel_type = rel_ent.get("relationship_type", "RELATED_TO")
@@ -156,7 +158,13 @@ class QueryService:
         # Log context building metrics
         logger.info(f"Built context: {len(entities)} entities, {len(text_units_seen)} unique text units")
         
-        return context_str
+        return {
+            "context": context_str,
+            "entity_count": len(entities),
+            "related_entities": related_entities_total,
+            "text_units_used": len(text_units_seen),
+            "context_length": len(context_str),
+        }
 
     def _assemble_global_context(self, retrieval_results: Dict[str, Any]) -> str:
         """
@@ -226,7 +234,11 @@ class QueryService:
             "num_communities": 0,
             "confidence_score": "0.0",
             "error": None,
+            "metadata": {},
+            "reasoning_steps": [],
         }
+        reasoning_steps: List[Dict[str, str]] = []
+        metadata: Dict[str, Any] = {}
         
         try:
             logger.info(f"Processing global query: {query}")
@@ -237,19 +249,41 @@ class QueryService:
             if retrieval_results.get("status") != "success":
                 result["error"] = retrieval_results.get("message", "Failed to retrieve global context")
                 logger.error(f"Global retrieval failed: {result['error']}")
+                reasoning_steps.append(
+                    {"step": "global_retrieval", "detail": result["error"]}
+                )
+                result["reasoning_steps"] = reasoning_steps
+                result["metadata"] = metadata
                 return result
             
             result["num_communities"] = retrieval_results.get("num_communities", 0)
+            metadata["num_communities"] = result["num_communities"]
+            metadata["total_entities"] = retrieval_results.get("total_entities")
+            reasoning_steps.append(
+                {
+                    "step": "global_retrieval",
+                    "detail": f"Retrieved {result['num_communities']} communities with summaries",
+                }
+            )
             
             # Check if summaries are available
             if not retrieval_results.get("summaries_available", False):
                 logger.warning("No community summaries available for global search")
                 result["error"] = "Community summaries not yet generated. Please process documents first."
+                reasoning_steps.append(
+                    {
+                        "step": "global_retrieval",
+                        "detail": result["error"],
+                    }
+                )
+                result["reasoning_steps"] = reasoning_steps
+                result["metadata"] = metadata
                 return result
             
             # Step 2: Assemble context from community summaries
             context = self._assemble_global_context(retrieval_results)
             result["context"] = context
+            metadata["context_length"] = len(context)
             
             # Step 3: Generate answer using LLM with global context
             answer_result = llm_service.generate_answer(
@@ -265,12 +299,23 @@ class QueryService:
             result["citations"] = answer_result.get("citations", [])
             result["confidence_score"] = answer_result.get("confidence_score", "0.0")
             result["status"] = "success"
+            metadata["answer_length"] = len(result["answer"])
+            reasoning_steps.append(
+                {
+                    "step": "generate_answer",
+                    "detail": f"Generated global answer with confidence {result['confidence_score']}",
+                }
+            )
             
             logger.info(f"Global query processed successfully with {result['num_communities']} communities")
             
         except Exception as e:
             logger.error(f"Global query processing error: {e}", exc_info=True)
             result["error"] = str(e)
+            reasoning_steps.append({"step": "error", "detail": str(e)})
+        
+        result["reasoning_steps"] = reasoning_steps
+        result["metadata"] = metadata
         
         return result
 
@@ -296,11 +341,18 @@ class QueryService:
             "status": "error",
             "query_type": "unknown",
             "entities_found": [],
+            "metadata": {},
+            "reasoning_steps": [],
             "context": "",
             "answer": "",
             "citations": [],
             "confidence_score": "0.0",
             "error": None,
+        }
+        reasoning_steps: List[Dict[str, str]] = []
+        metadata: Dict[str, Any] = {
+            "hop_limit": hop_limit,
+            "document_id": document_id,
         }
 
         try:
@@ -313,11 +365,27 @@ class QueryService:
                     "error", "Unknown error"
                 )
                 logger.error(f"Query classification failed: {result['error']}")
+                reasoning_steps.append(
+                    {
+                        "step": "classify_query",
+                        "detail": result["error"],
+                    }
+                )
+                result["reasoning_steps"] = reasoning_steps
+                result["metadata"] = metadata
                 return result
 
             query_type = classification["classification"].get("type", "EXPLORATORY")
             key_entities = classification["classification"].get("key_entities", [])
             result["query_type"] = query_type
+            metadata["query_type"] = query_type
+            metadata["classified_entities"] = key_entities
+            reasoning_steps.append(
+                {
+                    "step": "classify_query",
+                    "detail": f"Detected '{query_type}' query with {len(key_entities)} key entities",
+                }
+            )
 
             logger.info(f"Query type: {query_type}, Key entities: {key_entities}")
 
@@ -325,6 +393,13 @@ class QueryService:
             if not key_entities:
                 # If LLM didn't extract entities, use fallback
                 key_entities = self.extract_query_entities(query)
+                metadata["fallback_entity_extraction"] = True
+                reasoning_steps.append(
+                    {
+                        "step": "entity_extraction_fallback",
+                        "detail": f"Fallback extractor found {len(key_entities)} candidate entities",
+                    }
+                )
 
             found_entities = self.find_entities_in_graph(key_entities)
 
@@ -355,13 +430,45 @@ class QueryService:
                         f"No entities found in graph"
                         + (f" for document {document_id}" if document_id else "")
                     )
+                    reasoning_steps.append(
+                        {
+                            "step": "entity_lookup",
+                            "detail": result["error"],
+                        }
+                    )
+                    result["reasoning_steps"] = reasoning_steps
+                    result["metadata"] = metadata
                     return result
 
             result["entities_found"] = list(found_entities.keys())
+            metadata["entities_found_count"] = len(found_entities)
+            reasoning_steps.append(
+                {
+                    "step": "entity_lookup",
+                    "detail": f"Resolved {len(found_entities)} entities in the graph",
+                }
+            )
 
             # Step 3: Build context from entities
-            context = self.build_context_from_entities(found_entities, hop_limit)
+            context_result = self.build_context_from_entities(found_entities, hop_limit)
+            context = context_result.get("context", "")
             result["context"] = context
+            metadata.update(
+                {
+                    "context_length": context_result.get("context_length", 0),
+                    "text_units_used": context_result.get("text_units_used", 0),
+                    "related_entities": context_result.get("related_entities", 0),
+                }
+            )
+            reasoning_steps.append(
+                {
+                    "step": "build_context",
+                    "detail": (
+                        f"Compiled context with {context_result.get('text_units_used', 0)} text units "
+                        f"and {context_result.get('related_entities', 0)} related entities"
+                    ),
+                }
+            )
 
             # Step 4: Generate answer
             answer_result = llm_service.generate_answer(
@@ -374,12 +481,28 @@ class QueryService:
             result["citations"] = answer_result.get("citations", [])
             result["confidence_score"] = answer_result.get("confidence_score", "0.0")
             result["status"] = "success"
+            metadata["answer_length"] = len(result["answer"])
+            reasoning_steps.append(
+                {
+                    "step": "generate_answer",
+                    "detail": f"Generated answer with confidence {result['confidence_score']}",
+                }
+            )
 
             logger.info(f"Query processed successfully, found {len(found_entities)} entities")
 
         except Exception as e:
             logger.error(f"Query processing error: {e}", exc_info=True)
             result["error"] = str(e)
+            reasoning_steps.append(
+                {
+                    "step": "error",
+                    "detail": str(e),
+                }
+            )
+
+        result["reasoning_steps"] = reasoning_steps
+        result["metadata"] = metadata
 
         return result
 

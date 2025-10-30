@@ -194,21 +194,21 @@ class MultiLevelRetrievalService:
             # Query communities with their summaries - focus on base level (level 0)
             query = """
             MATCH (c:Community)
-            WHERE c.level = 0  # Only base-level communities for global search
-            WITH c
+            WHERE c.level = 0
             OPTIONAL MATCH (e:Entity)-[r:IN_COMMUNITY]->(c)
+            WITH c, count(DISTINCT e) AS community_size
             RETURN
                 collect({
                     community_id: c.id,
                     level: COALESCE(c.level, 0),
-                    size: count(DISTINCT e),
+                    size: community_size,
                     summary: COALESCE(c.summary, ""),
                     themes: COALESCE(c.key_themes, ""),
                     significance: COALESCE(c.significance, "medium"),
                     created_at: c.createdAt
                 }) AS communities,
                 count(DISTINCT c) AS num_communities,
-                count(DISTINCT e) AS total_entities
+                sum(community_size) AS total_entities
             """
 
             result = session.run(query).single()
