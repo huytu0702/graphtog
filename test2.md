@@ -134,19 +134,3 @@ h) **Báo cáo đánh giá tác động tổng hợp;**
 i) **Xây dựng cơ chế giám sát, báo cáo, xây dựng bộ chỉ số đánh giá kết quả và tác động**, quy trình theo dõi tiến độ, công khai kết quả định kỳ.
 
 3. Đề án phát triển đô thị thông minh tỉnh, thành phố là một hợp phần thuộc chương trình, đề án tổng thể về phát triển khoa học, công nghệ, đổi mới sáng tạo và chuyển đổi số của tỉnh, thành phố.
-
-#### Điều 7. Lập, phê duyệt và điều chỉnh đề án phát triển đô thị thông minh tỉnh, thành phố
-
-1. Ủy ban nhân dân cấp tỉnh:
-
-a) **Giao cơ quan chuyên môn trực thuộc chủ trì, phối hợp với các sở, ngành có liên quan**, huy động các tư vấn, chuyên gia trong nước, quốc tế hoặc trực tiếp lập mới hoặc rà soát, cập nhật đề án phát triển đô thị thông minh tỉnh, thành phố trực thuộc trung ương đã có, bảo đảm đáp ứng yêu cầu quy định tại Điều 6 Nghị định này;
-
-b) **Phê duyệt, điều chỉnh đề án phát triển đô thị thông minh.** Việc điều chỉnh đề án được thực hiện khi có sự thay đổi lớn về định hướng phát triển kinh tế - xã hội của địa phương, định hướng, pháp luật về phát triển đô thị thông minh, yêu cầu của cấp có thẩm quyền và thực tế tình hình phát triển đô thị thông minh ở địa phương;
-
-c) **Quy định hồ sơ, trình tự phê duyệt, điều chỉnh đề án;** quyết định việc lấy ý kiến góp ý, xác định thời hạn và hình thức cụ thể bảo đảm đề án được lấy ý kiến rộng rãi của các cơ quan, tổ chức, chuyên gia và công đồng dân cư cơ liên quan; trình tự lấy ý kiến của Hội đồng điều phối phát triển đô thị thông minh cấp tỉnh trước khi phê duyệt đề án;
-
-d) **Chỉ đạo xây dựng kế hoạch phát triển đô thị thông minh theo ngành, lĩnh vực, khu vực** sau khi đề án phát triển đô thị thông minh được phê duyệt.
-
-2. Ủy ban nhân dân cấp tỉnh chỉ đạo thực hiện rà soát các chương trình, đề án cấp tỉnh về phát triển khoa học, công nghệ, đổi mới sáng tạo và chuyển đổi số, bảo đảm sự thống nhất không chồng chéo giữa các chương trình, đề án, kế hoạch và đáp ứng mục tiêu phát triển đô thị thông minh.
-
-3. Đề án phát triển đô thị thông minh tỉnh, thành phố sau khi phê duyệt phải được công khai trên Cổng thông tin điện tử của tỉnh và Cổng Thông tin Đô thị thông minh Quốc gia.

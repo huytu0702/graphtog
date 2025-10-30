@@ -65,7 +65,21 @@ export default function RegisterPage() {
           setError('Registration successful, but could not sign in automatically. Please try logging in manually.');
         }
       } else {
-        setError(data.detail || 'Registration failed');
+        // Handle FastAPI validation errors (422) and other errors
+        let errorMessage = 'Registration failed';
+        
+        if (data.detail) {
+          if (typeof data.detail === 'string') {
+            errorMessage = data.detail;
+          } else if (Array.isArray(data.detail)) {
+            // FastAPI validation errors format: [{type, loc, msg, input, ctx}, ...]
+            errorMessage = data.detail.map((err: any) => err.msg || JSON.stringify(err)).join(', ');
+          } else if (typeof data.detail === 'object') {
+            errorMessage = JSON.stringify(data.detail);
+          }
+        }
+        
+        setError(errorMessage);
       }
     } catch (error) {
       console.error('Registration error:', error);

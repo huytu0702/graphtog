@@ -387,7 +387,7 @@ class GraphService:
 
             if document_id:
                 query = """
-                MATCH (d:Document {id: $document_id})<-[:BELONGS_TO]-(t:TextUnit)<-[:MENTIONED_IN]-(e:Entity)
+                MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)<-[:MENTIONED_IN]-(e:Entity)
                 RETURN DISTINCT e.id as id, e.name as name, e.type as type, 
                        e.description as description, e.confidence as confidence,
                        e.mention_count as mention_count
@@ -420,42 +420,123 @@ class GraphService:
         self,
         entity_id: str,
         hop_limit: int = 2,
+        include_text: bool = True,
     ) -> Dict[str, Any]:
         """
-        Get context around an entity (related entities and relationships)
+        Get context around an entity (related entities, relationships, and text units)
+        Following Microsoft GraphRAG methodology
 
         Args:
             entity_id: Entity to get context for
-            hop_limit: How many hops to traverse
+            hop_limit: How many hops to traverse for entity relationships
+            include_text: Whether to include text units (default True per GraphRAG)
 
         Returns:
-            Dict with entities and relationships
+            Dict with entities, relationships, and text_units
         """
         try:
             session = self.get_session()
 
-            # Get entity and related entities
-            query = """
+            # PART 1: Get related entities via semantic relationships (NOT IN_COMMUNITY)
+            # This follows Microsoft GraphRAG's local search pattern
+            entity_query = """
             MATCH (e:Entity {id: $entity_id})
-            OPTIONAL MATCH path = (e)-[r*1..{hops}]-(related:Entity)
-            RETURN DISTINCT
-                e.id as central_entity_id,
-                e.name as central_entity_name,
-                COLLECT(DISTINCT {{id: related.id, name: related.name, type: related.type}}) as related_entities,
-                COLLECT(DISTINCT {{type: type(r), description: last(r).description}}) as relationship_types
-            """.format(
-                hops=hop_limit
-            )
+            
+            // Get directly related entities via semantic relationships
+            OPTIONAL MATCH (e)-[r1:RELATED_TO|SUPPORTS|CAUSES|OPPOSES|MENTIONS|CONTAINS|PRECEDES|REQUIRED]-(related1:Entity)
+            
+            // Get 2-hop related entities if hop_limit >= 2
+            OPTIONAL MATCH (e)-[r1:RELATED_TO|SUPPORTS|CAUSES|OPPOSES|MENTIONS|CONTAINS|PRECEDES|REQUIRED]-
+                          (intermediate:Entity)-[r2:RELATED_TO|SUPPORTS|CAUSES|OPPOSES|MENTIONS|CONTAINS|PRECEDES|REQUIRED]-(related2:Entity)
+            WHERE $hop_limit >= 2
+            
+            WITH e, 
+                 COLLECT(DISTINCT {
+                     entity: related1, 
+                     relationship: r1,
+                     distance: 1
+                 }) + COLLECT(DISTINCT {
+                     entity: related2,
+                     relationship: r2, 
+                     distance: 2
+                 }) AS all_related
+            
+            // Filter out nulls and duplicates
+            UNWIND all_related AS rel_item
+            WITH e, rel_item
+            WHERE rel_item.entity IS NOT NULL
+            
+            WITH e,
+                 COLLECT(DISTINCT {
+                     id: rel_item.entity.id,
+                     name: rel_item.entity.name,
+                     type: rel_item.entity.type,
+                     description: rel_item.entity.description,
+                     distance: rel_item.distance,
+                     relationship_type: type(rel_item.relationship)
+                 }) AS related_entities
+            
+            RETURN 
+                e.id AS central_entity_id,
+                e.name AS central_entity_name,
+                e.type AS central_entity_type,
+                e.description AS central_entity_description,
+                related_entities
+            """
 
-            result = session.run(query, entity_id=entity_id)
+            result = session.run(entity_query, entity_id=entity_id, hop_limit=hop_limit)
             record = result.single()
 
-            if record:
-                return dict(record)
-            return {}
+            if not record:
+                logger.debug(f"Entity {entity_id} not found in graph")
+                return {}
+
+            data = record.data()
+            context = {
+                "central_entity_id": data.get("central_entity_id"),
+                "central_entity_name": data.get("central_entity_name"),
+                "central_entity_type": data.get("central_entity_type"),
+                "central_entity_description": data.get("central_entity_description"),
+                "related_entities": data.get("related_entities") or [],
+            }
+
+            # PART 2: Get text units containing this entity (Microsoft GraphRAG requirement)
+            # This provides actual document text for LLM context
+            if include_text:
+                text_query = """
+                MATCH (e:Entity {id: $entity_id})-[:MENTIONED_IN]->(t:TextUnit)
+                RETURN 
+                    t.id AS text_unit_id,
+                    t.text AS text,
+                    t.document_id AS document_id,
+                    t.start_char AS start_char,
+                    t.end_char AS end_char
+                ORDER BY t.start_char
+                LIMIT 10
+                """
+
+                text_results = session.run(text_query, entity_id=entity_id)
+                text_units = []
+
+                for text_record in text_results:
+                    text_data = text_record.data()
+                    text_units.append(
+                        {
+                            "text_unit_id": text_data.get("text_unit_id"),
+                            "text": text_data.get("text"),
+                            "document_id": text_data.get("document_id"),
+                            "start_char": text_data.get("start_char"),
+                            "end_char": text_data.get("end_char"),
+                        }
+                    )
+
+                context["text_units"] = text_units
+                logger.debug(f"Retrieved {len(text_units)} text units for entity {entity_id}")
+
+            return context
 
         except Exception as e:
-            logger.error(f"Context retrieval error: {e}")
+            logger.warning(f"Context retrieval error for entity {entity_id}: {e}")
             return {}
 
     def get_document_statistics(self, document_id: str) -> Dict[str, Any]:

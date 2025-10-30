@@ -53,12 +53,8 @@ class CommunityDetectionService:
                 'entity_graph',
                 'Entity',
                 {
-                    RELATED_TO: {},
-                    MENTIONED_IN: {orientation: 'UNDIRECTED'},
-                    PART_OF: {orientation: 'UNDIRECTED'}
-                },
-                {
-                    relationshipProperties: ['weight']
+                    RELATED_TO: {orientation: 'UNDIRECTED'},
+                    MENTIONED_IN: {orientation: 'UNDIRECTED'}
                 }
             )
             YIELD graphName, nodeCount, relationshipCount, projectMillis
@@ -114,10 +110,10 @@ class CommunityDetectionService:
             CALL gds.leiden.stream(
                 'entity_graph',
                 {
-                    seed: $seed,
+                    randomSeed: $seed,
                     includeIntermediateCommunities: $include_intermediate,
                     tolerance: $tolerance,
-                    maxIterations: $max_iterations,
+                    maxLevels: $max_iterations,
                     concurrency: 4
                 }
             )
@@ -166,33 +162,74 @@ class CommunityDetectionService:
 
     def _store_community_assignments(self, session, results: List[Dict]) -> None:
         """
-        Store community assignments in Neo4j
+        Store community assignments in Neo4j with hierarchy levels
 
         Args:
             session: Neo4j session
-            results: Community detection results
+            results: Community detection results with hierarchy info
         """
         try:
-            # Create Community nodes and relationships
+            # First pass: create all community nodes and relationships
             for record in results:
                 entity_name = record["entity_name"]
                 community_id = record["communityId"]
+                community_level = 0  # Base level for primary community
 
+                # Create primary community relationship
                 store_query = """
                 MATCH (e:Entity {name: $entity_name})
                 MERGE (c:Community {id: $community_id})
-                ON CREATE SET c.createdAt = datetime()
+                ON CREATE SET 
+                    c.createdAt = datetime(),
+                    c.level = $community_level,
+                    c.summary = ""
                 MERGE (e)-[r:IN_COMMUNITY]->(c)
-                SET r.confidence = 0.95, r.timestamp = datetime()
+                SET r.confidence = 0.95, 
+                    r.timestamp = datetime(),
+                    r.community_level = $community_level
                 RETURN e.name, c.id
                 """
 
                 session.run(
                     store_query,
-                    {"entity_name": entity_name, "community_id": community_id},
+                    {
+                        "entity_name": entity_name,
+                        "community_id": community_id,
+                        "community_level": community_level,
+                    },
                 )
 
-            logger.info("Community assignments stored in Neo4j")
+                # Store intermediate communities (hierarchy)
+                if "intermediateCommunityIds" in record and record["intermediateCommunityIds"]:
+                    intermediate_ids = record["intermediateCommunityIds"]
+                    for idx, inter_comm_id in enumerate(intermediate_ids):
+                        level = idx + 1  # Higher level
+
+                        # Create intermediate community node
+                        inter_query = """
+                        MATCH (e:Entity {name: $entity_name})
+                        MERGE (ic:Community {id: $inter_community_id})
+                        ON CREATE SET 
+                            ic.createdAt = datetime(),
+                            ic.level = $community_level,
+                            ic.summary = ""
+                        MERGE (e)-[r2:IN_COMMUNITY]->(ic)
+                        SET r2.confidence = 0.85,
+                            r2.timestamp = datetime(),
+                            r2.community_level = $community_level
+                        RETURN e.name, ic.id
+                        """
+
+                        session.run(
+                            inter_query,
+                            {
+                                "entity_name": entity_name,
+                                "inter_community_id": inter_comm_id,
+                                "community_level": level,
+                            },
+                        )
+
+            logger.info("✅ Community assignments stored with hierarchy levels")
 
         except Exception as e:
             logger.error(f"Failed to store community assignments: {str(e)}")

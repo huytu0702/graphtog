@@ -255,6 +255,75 @@ async def get_graph_statistics() -> Dict:
         raise HTTPException(status_code=500, detail="Error getting graph statistics")
 
 
+@router.post("/global")
+async def process_global_query(
+    request: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Dict:
+    """
+    Process a global/holistic query using community summaries (GraphRAG Global Search)
+    
+    Best for:
+    - Dataset-wide questions ("What are the main themes?")
+    - High-level insights ("Summarize the key topics")
+    - Holistic understanding ("What is this dataset about?")
+    
+    Args:
+        request: Dict with "query" text
+        current_user: Current authenticated user
+        db: Database session
+        
+    Returns:
+        Query result with community summaries and answer
+    """
+    try:
+        query_text = request.get("query", "").strip()
+        user_id = current_user.id
+        
+        if not query_text:
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        
+        if len(query_text) > 1000:
+            raise HTTPException(status_code=400, detail="Query too long (max 1000 characters)")
+        
+        # Process global query
+        logger.info(f"Processing global query for user {user_id}: {query_text}")
+        result = query_service.process_global_query(query_text)
+        
+        if result.get("status") == "error":
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"Global query failed: {error_message}")
+            raise HTTPException(status_code=500, detail=error_message)
+        
+        # Store query in database
+        try:
+            db_query = Query(
+                user_id=user_id,
+                document_id=None,  # Global queries span all documents
+                query_text=query_text,
+                response=result.get("answer", ""),
+                reasoning_chain=result.get("context", ""),
+                query_mode="global",
+                confidence_score=result.get("confidence_score", "0.0"),
+            )
+            db.add(db_query)
+            db.commit()
+            db.refresh(db_query)
+            result["id"] = str(db_query.id)
+        except Exception as e:
+            logger.error(f"Error saving global query to database: {e}")
+            db.rollback()
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Global query processing error: {e}")
+        raise HTTPException(status_code=500, detail=f"Global query error: {str(e)}")
+
+
 @router.post("/batch-queries")
 async def batch_process_queries(
     request: dict,

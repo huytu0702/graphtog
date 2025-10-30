@@ -27,28 +27,55 @@ class MultiLevelRetrievalService:
             self.session = get_neo4j_session()
         return self.session
 
-    def retrieve_local_context(self, query_entity: str, hop_limit: int = 1) -> Dict[str, Any]:
+    def retrieve_local_context(
+        self, 
+        query_entity: str, 
+        hop_limit: int = 1,
+        include_text: bool = True
+    ) -> Dict[str, Any]:
         """
-        Retrieve local context around a query entity
+        Retrieve local context around a query entity following Microsoft GraphRAG methodology
+        
+        Microsoft GraphRAG local search requires:
+        1. Related entities via graph traversal
+        2. Actual text units (document chunks) for context
+        3. Relationship details
 
         Args:
             query_entity: Entity name to search around
-            hop_limit: Number of hops to traverse
+            hop_limit: Number of hops to traverse (default 1 per GraphRAG)
+            include_text: Whether to include text units (strongly recommended)
 
         Returns:
-            Dictionary with local context
+            Dictionary with local context including entities, relationships, and text
         """
         try:
             session = self.get_session()
 
-            # Find the entity
+            # Find the entity and related entities via semantic relationships
+            # Exclude IN_COMMUNITY to focus on actual content relationships
             query = f"""
             MATCH (source:Entity {{name: $entity}})
-            MATCH (source)-[r*1..{hop_limit}]-(neighbor:Entity)
+            
+            // Get semantically related entities (not just community membership)
+            OPTIONAL MATCH (source)-[r:RELATED_TO|SUPPORTS|CAUSES|OPPOSES|MENTIONS|CONTAINS|PRECEDES|REQUIRED*1..{hop_limit}]-(neighbor:Entity)
+            
+            WITH source, 
+                 COLLECT(DISTINCT {{
+                     name: neighbor.name,
+                     type: neighbor.type,
+                     description: neighbor.description,
+                     id: neighbor.id
+                 }}) AS neighbors,
+                 COLLECT(DISTINCT type(r)) AS relationship_types
+            
             RETURN
+                source.id AS source_id,
                 source.name AS source_entity,
-                collect(DISTINCT neighbor.name) AS neighbors,
-                collect(DISTINCT type(r)) AS relationship_types
+                source.type AS source_type,
+                source.description AS source_description,
+                [n IN neighbors WHERE n.name IS NOT NULL] AS neighbors,
+                relationship_types
             """
 
             result = session.run(query, {"entity": query_entity}).single()
@@ -56,29 +83,47 @@ class MultiLevelRetrievalService:
             if not result:
                 return {"status": "not_found", "entity": query_entity}
 
-            # Get relationships details
-            details_query = f"""
-            MATCH (source:Entity {{name: $entity}})
-            MATCH path = (source)-[r*1..{hop_limit}]-(neighbor:Entity)
-            RETURN
-                source.name AS source,
-                neighbor.name AS target,
-                [rel in relationships(path) | type(rel)] AS path_types,
-                length(path) AS distance
-            ORDER BY distance
-            LIMIT 20
-            """
-
-            paths = session.run(details_query, {"entity": query_entity}).data()
-
-            return {
+            data = result.data()
+            response = {
                 "status": "success",
                 "retrieval_type": "local",
-                "source_entity": query_entity,
-                "neighbor_count": len(result["neighbors"]),
-                "neighbors": result["neighbors"][:15],
-                "paths": paths,
+                "source_entity": data.get("source_entity"),
+                "source_id": data.get("source_id"),
+                "source_type": data.get("source_type"),
+                "source_description": data.get("source_description"),
+                "neighbor_count": len(data.get("neighbors", [])),
+                "neighbors": data.get("neighbors", [])[:15],
+                "relationship_types": [rt for rt in data.get("relationship_types", []) if rt],
             }
+            
+            # Retrieve text units for the source entity (Microsoft GraphRAG requirement)
+            if include_text and data.get("source_id"):
+                text_query = """
+                MATCH (e:Entity {id: $entity_id})-[:MENTIONED_IN]->(t:TextUnit)
+                RETURN 
+                    t.id AS text_unit_id,
+                    t.text AS text,
+                    t.document_id AS document_id,
+                    t.start_char AS start_char
+                ORDER BY t.start_char
+                LIMIT 10
+                """
+                
+                text_results = session.run(text_query, entity_id=data.get("source_id"))
+                text_units = []
+                
+                for text_record in text_results:
+                    text_data = text_record.data()
+                    text_units.append({
+                        "text_unit_id": text_data.get("text_unit_id"),
+                        "text": text_data.get("text"),
+                        "document_id": text_data.get("document_id"),
+                    })
+                
+                response["text_units"] = text_units
+                logger.info(f"Retrieved {len(text_units)} text units for local search on '{query_entity}'")
+
+            return response
 
         except Exception as e:
             logger.error(f"Local retrieval failed: {str(e)}")
@@ -133,25 +178,34 @@ class MultiLevelRetrievalService:
             logger.error(f"Community retrieval failed: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    def retrieve_global_context(self) -> Dict[str, Any]:
+    def retrieve_global_context(self, use_summaries: bool = True) -> Dict[str, Any]:
         """
-        Retrieve global context (all communities summary)
-
+        Retrieve global context (all communities summary) with Microsoft GraphRAG methodology
+        
+        Args:
+            use_summaries: Whether to include generated summaries
+            
         Returns:
-            Dictionary with global context
+            Dictionary with global context including summaries, themes, and significance
         """
         try:
             session = self.get_session()
 
+            # Query communities with their summaries - focus on base level (level 0)
             query = """
             MATCH (c:Community)
+            WHERE c.level = 0  # Only base-level communities for global search
             WITH c
-            MATCH (e:Entity)-[r:IN_COMMUNITY]->(c)
+            OPTIONAL MATCH (e:Entity)-[r:IN_COMMUNITY]->(c)
             RETURN
                 collect({
                     community_id: c.id,
+                    level: COALESCE(c.level, 0),
                     size: count(DISTINCT e),
-                    summary: c.summary
+                    summary: COALESCE(c.summary, ""),
+                    themes: COALESCE(c.key_themes, ""),
+                    significance: COALESCE(c.significance, "medium"),
+                    created_at: c.createdAt
                 }) AS communities,
                 count(DISTINCT c) AS num_communities,
                 count(DISTINCT e) AS total_entities
@@ -165,12 +219,29 @@ class MultiLevelRetrievalService:
                     "message": "No communities found",
                 }
 
+            communities = result["communities"]
+            
+            # Filter communities with summaries if requested
+            if use_summaries:
+                communities_with_summaries = [
+                    c for c in communities if c.get("summary") and c["summary"].strip()
+                ]
+                if not communities_with_summaries:
+                    logger.warning("No community summaries found, using raw communities")
+                else:
+                    communities = communities_with_summaries
+                    logger.info(f"Found {len(communities)} communities with summaries")
+            
+            # Sort by size (importance)
+            communities = sorted(communities, key=lambda x: x.get("size", 0), reverse=True)
+
             return {
                 "status": "success",
                 "retrieval_type": "global",
-                "num_communities": result["num_communities"],
+                "num_communities": len(communities),
                 "total_entities": result["total_entities"],
-                "communities": result["communities"],
+                "communities": communities,
+                "summaries_available": all(c.get("summary") and c["summary"].strip() for c in communities),
             }
 
         except Exception as e:

@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models.document import Document
 from app.services.chunking import chunking_service
+from app.services.community_detection import community_detection_service
+from app.services.community_summarization import community_summarization_service
 from app.services.graph_service import graph_service
 from app.services.llm_service import llm_service
 
@@ -119,6 +121,8 @@ async def process_document_with_graph(
         "chunks_created": 0,
         "entities_extracted": 0,
         "relationships_extracted": 0,
+        "communities_detected": 0,
+        "communities_summarized": 0,
         "error": None,
     }
 
@@ -252,8 +256,44 @@ async def process_document_with_graph(
                         )
                         results["relationships_extracted"] += 1
 
-        # Step 8: Update document status
-        logger.info("Step 8: Finalizing processing...")
+        # Step 8: Community detection using Leiden algorithm
+        logger.info("Step 8: Detecting communities with Leiden algorithm...")
+        if update_callback:
+            await update_callback("community_detection", 75)
+        
+        # Initialize and run community detection
+        community_results = community_detection_service.detect_communities(
+            seed=42,
+            include_intermediate_communities=True,
+            tolerance=0.0001,
+            max_iterations=10,
+        )
+        
+        if community_results["status"] == "success":
+            num_communities = community_results.get("num_communities", 0)
+            logger.info(f"✅ Detected {num_communities} communities")
+            results["communities_detected"] = num_communities
+        else:
+            logger.warning(f"⚠️ Community detection had issues: {community_results.get('message', 'Unknown')}")
+            results["communities_detected"] = 0
+        
+        # Step 9: Generate community summaries
+        logger.info("Step 9: Generating community summaries...")
+        if update_callback:
+            await update_callback("summarization", 85)
+        
+        # Generate summaries for all detected communities
+        summary_results = community_summarization_service.summarize_all_communities()
+        if summary_results["status"] == "success":
+            num_summarized = summary_results.get("num_communities_summarized", 0)
+            logger.info(f"✅ Generated {num_summarized} community summaries")
+            results["communities_summarized"] = num_summarized
+        else:
+            logger.warning(f"⚠️ Community summarization had issues: {summary_results.get('message', 'Unknown')}")
+            results["communities_summarized"] = 0
+
+        # Step 10: Update document status
+        logger.info("Step 10: Finalizing processing...")
         if update_callback:
             await update_callback("finalization", 95)
 
