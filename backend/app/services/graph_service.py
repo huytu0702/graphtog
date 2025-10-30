@@ -43,6 +43,7 @@ class GraphService:
                 "CREATE CONSTRAINT document_name IF NOT EXISTS FOR (d:Document) REQUIRE d.name IS UNIQUE",
                 "CREATE CONSTRAINT textunit_id IF NOT EXISTS FOR (t:TextUnit) REQUIRE t.id IS UNIQUE",
                 "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (c:Community) REQUIRE c.id IS UNIQUE",
+                "CREATE CONSTRAINT claim_id IF NOT EXISTS FOR (c:Claim) REQUIRE c.id IS UNIQUE",
             ]
 
             for constraint in constraints:
@@ -59,6 +60,8 @@ class GraphService:
                 "CREATE INDEX textunit_doc_id IF NOT EXISTS FOR (t:TextUnit) ON (t.document_id)",
                 "CREATE INDEX entity_confidence IF NOT EXISTS FOR (e:Entity) ON (e.confidence)",
                 "CREATE INDEX relationship_type IF NOT EXISTS FOR (r:MENTIONED_IN) ON (r.type)",
+                "CREATE INDEX claim_type IF NOT EXISTS FOR (c:Claim) ON (c.claim_type)",
+                "CREATE INDEX claim_status IF NOT EXISTS FOR (c:Claim) ON (c.status)",
             ]
 
             for index in indexes:
@@ -602,6 +605,576 @@ class GraphService:
         except Exception as e:
             logger.error(f"Graph statistics error: {e}")
             return {}
+
+    def create_claim_node(
+        self,
+        subject_entity_name: str,
+        object_entity_name: str,
+        claim_type: str,
+        status: str,
+        description: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        source_text: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Create a Claim node in the graph
+
+        Args:
+            subject_entity_name: Subject entity (who makes/commits the claim)
+            object_entity_name: Object entity (who is affected/reports)
+            claim_type: Type/category of claim
+            status: TRUE, FALSE, or SUSPECTED
+            description: Detailed claim description
+            start_date: Claim start date (ISO-8601 format)
+            end_date: Claim end date (ISO-8601 format)
+            source_text: Source text supporting the claim
+
+        Returns:
+            Claim ID if successful, None otherwise
+        """
+        try:
+            session = self.get_session()
+
+            # Generate claim ID using subject, object, type, and description
+            claim_key = f"{subject_entity_name}:{object_entity_name}:{claim_type}:{description}"
+            claim_id = hashlib.md5(claim_key.encode()).hexdigest()[:16]
+
+            query = """
+            CREATE (c:Claim {
+                id: $claim_id,
+                subject: $subject,
+                object: $object,
+                claim_type: $claim_type,
+                status: $status,
+                description: $description,
+                start_date: $start_date,
+                end_date: $end_date,
+                source_text: $source_text,
+                created_at: datetime()
+            })
+            RETURN c.id as id
+            """
+
+            result = session.run(
+                query,
+                claim_id=claim_id,
+                subject=subject_entity_name,
+                object=object_entity_name,
+                claim_type=claim_type,
+                status=status,
+                description=description,
+                start_date=start_date,
+                end_date=end_date,
+                source_text=source_text,
+            )
+
+            record = result.single()
+            if record:
+                logger.info(f"Created claim: {subject_entity_name} -> {claim_type}")
+                return record["id"]
+            return None
+
+        except Exception as e:
+            logger.error(f"Claim creation error: {e}")
+            return None
+
+    def link_claim_to_entities(
+        self,
+        claim_id: str,
+        subject_entity_name: str,
+        object_entity_name: Optional[str] = None,
+    ) -> bool:
+        """
+        Create relationships between claim and entities
+
+        Creates:
+        - Entity (subject) -[:MAKES_CLAIM]-> Claim
+        - Claim -[:ABOUT]-> Entity (object) [if object exists]
+
+        Args:
+            claim_id: Claim ID
+            subject_entity_name: Subject entity name
+            object_entity_name: Object entity name (optional)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            session = self.get_session()
+
+            # Link subject entity to claim (MAKES_CLAIM)
+            query_subject = """
+            MATCH (c:Claim {id: $claim_id})
+            MATCH (e:Entity {name: $entity_name})
+            MERGE (e)-[r:MAKES_CLAIM]->(c)
+            ON CREATE SET r.created_at = datetime()
+            RETURN r
+            """
+
+            result = session.run(
+                query_subject,
+                claim_id=claim_id,
+                entity_name=subject_entity_name,
+            )
+
+            if not result.single():
+                logger.warning(f"Failed to link subject entity {subject_entity_name} to claim")
+                return False
+
+            # Link claim to object entity (ABOUT) if object exists and is not NONE
+            if object_entity_name and object_entity_name.upper() != "NONE":
+                query_object = """
+                MATCH (c:Claim {id: $claim_id})
+                MATCH (e:Entity {name: $entity_name})
+                MERGE (c)-[r:ABOUT]->(e)
+                ON CREATE SET r.created_at = datetime()
+                RETURN r
+                """
+
+                session.run(
+                    query_object,
+                    claim_id=claim_id,
+                    entity_name=object_entity_name,
+                )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Claim-entity linking error: {e}")
+            return False
+
+    def link_claim_to_textunit(
+        self,
+        claim_id: str,
+        textunit_id: str,
+    ) -> bool:
+        """
+        Create SOURCED_FROM relationship between claim and text unit
+
+        Args:
+            claim_id: Claim ID
+            textunit_id: TextUnit ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            session = self.get_session()
+
+            query = """
+            MATCH (c:Claim {id: $claim_id})
+            MATCH (t:TextUnit {id: $textunit_id})
+            MERGE (c)-[r:SOURCED_FROM]->(t)
+            ON CREATE SET r.created_at = datetime()
+            RETURN r
+            """
+
+            result = session.run(
+                query,
+                claim_id=claim_id,
+                textunit_id=textunit_id,
+            )
+
+            return result.single() is not None
+
+        except Exception as e:
+            logger.error(f"Claim-TextUnit linking error: {e}")
+            return False
+
+    def get_claims_for_entity(
+        self,
+        entity_name: str,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all claims related to an entity (as subject or object)
+
+        Args:
+            entity_name: Entity name
+            limit: Maximum number of claims to return
+
+        Returns:
+            List of claim dictionaries
+        """
+        try:
+            session = self.get_session()
+
+            query = """
+            MATCH (e:Entity {name: $entity_name})
+            MATCH (c:Claim)
+            WHERE (e)-[:MAKES_CLAIM]->(c) OR (c)-[:ABOUT]->(e)
+            OPTIONAL MATCH (c)-[:SOURCED_FROM]->(t:TextUnit)
+            RETURN c, t.text as source_text
+            LIMIT $limit
+            """
+
+            result = session.run(
+                query,
+                entity_name=entity_name,
+                limit=limit,
+            )
+
+            claims = []
+            for record in result:
+                claim_node = record["c"]
+                claims.append({
+                    "id": claim_node["id"],
+                    "subject": claim_node["subject"],
+                    "object": claim_node["object"],
+                    "claim_type": claim_node["claim_type"],
+                    "status": claim_node["status"],
+                    "description": claim_node["description"],
+                    "start_date": claim_node.get("start_date"),
+                    "end_date": claim_node.get("end_date"),
+                    "source_text": record.get("source_text") or claim_node.get("source_text", ""),
+                    "created_at": str(claim_node.get("created_at", "")),
+                })
+
+            return claims
+
+        except Exception as e:
+            logger.error(f"Get claims error: {e}")
+            return []
+
+    def get_all_claims(
+        self,
+        claim_type: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all claims in the graph with optional filters
+
+        Args:
+            claim_type: Filter by claim type (optional)
+            status: Filter by status (optional)
+            limit: Maximum number of claims to return
+
+        Returns:
+            List of claim dictionaries
+        """
+        try:
+            session = self.get_session()
+
+            # Build query with optional filters
+            where_clauses = []
+            params = {"limit": limit}
+
+            if claim_type:
+                where_clauses.append("c.claim_type = $claim_type")
+                params["claim_type"] = claim_type
+
+            if status:
+                where_clauses.append("c.status = $status")
+                params["status"] = status
+
+            where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            query = f"""
+            MATCH (c:Claim)
+            WHERE {where_clause}
+            OPTIONAL MATCH (c)-[:SOURCED_FROM]->(t:TextUnit)
+            RETURN c, t.text as source_text
+            LIMIT $limit
+            """
+
+            result = session.run(query, **params)
+
+            claims = []
+            for record in result:
+                claim_node = record["c"]
+                claims.append({
+                    "id": claim_node["id"],
+                    "subject": claim_node["subject"],
+                    "object": claim_node["object"],
+                    "claim_type": claim_node["claim_type"],
+                    "status": claim_node["status"],
+                    "description": claim_node["description"],
+                    "start_date": claim_node.get("start_date"),
+                    "end_date": claim_node.get("end_date"),
+                    "source_text": record.get("source_text") or claim_node.get("source_text", ""),
+                    "created_at": str(claim_node.get("created_at", "")),
+                })
+
+            return claims
+
+        except Exception as e:
+            logger.error(f"Get all claims error: {e}")
+            return []
+
+    def get_affected_communities_for_document(
+        self,
+        document_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get all communities affected by a document update
+        Used for incremental community detection
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            Dictionary with affected communities and entities
+        """
+        try:
+            session = self.get_session()
+
+            query = """
+            MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)
+            <-[:MENTIONED_IN]-(e:Entity)-[:IN_COMMUNITY]->(c:Community)
+            RETURN
+                COLLECT(DISTINCT c.id) AS community_ids,
+                COLLECT(DISTINCT e.id) AS entity_ids,
+                COUNT(DISTINCT c) AS num_communities,
+                COUNT(DISTINCT e) AS num_entities
+            """
+
+            result = session.run(query, document_id=document_id).single()
+
+            if result:
+                return {
+                    "community_ids": result["community_ids"],
+                    "affected_entities": result["entity_ids"],
+                    "num_communities": result["num_communities"],
+                    "num_entities": result["num_entities"],
+                }
+
+            return {
+                "community_ids": [],
+                "affected_entities": [],
+                "num_communities": 0,
+                "num_entities": 0,
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting affected communities: {e}")
+            return {
+                "community_ids": [],
+                "affected_entities": [],
+                "num_communities": 0,
+                "num_entities": 0,
+            }
+
+    def delete_document_graph_data(
+        self,
+        document_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Delete all graph data associated with a document
+        Used for incremental updates to clean old data before reprocessing
+
+        This includes:
+        - TextUnit nodes and their relationships
+        - Claims sourced from this document
+        - Orphaned entities (entities only mentioned in this document)
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            Dictionary with deletion statistics
+        """
+        try:
+            session = self.get_session()
+
+            # Step 1: Delete claims sourced from this document's text units
+            claims_query = """
+            MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)
+            <-[:SOURCED_FROM]-(c:Claim)
+            DETACH DELETE c
+            RETURN COUNT(c) AS claims_deleted
+            """
+            claims_result = session.run(claims_query, document_id=document_id).single()
+            claims_deleted = claims_result["claims_deleted"] if claims_result else 0
+
+            # Step 2: Get entities that will become orphaned (only mentioned in this document)
+            orphan_query = """
+            MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)
+            <-[:MENTIONED_IN]-(e:Entity)
+            WHERE NOT EXISTS {
+                MATCH (e)-[:MENTIONED_IN]->(other_t:TextUnit)-[:PART_OF]->(:Document)
+                WHERE other_t.document_id <> $document_id
+            }
+            RETURN COLLECT(e.id) AS orphan_entity_ids, COUNT(e) AS orphan_count
+            """
+            orphan_result = session.run(orphan_query, document_id=document_id).single()
+            orphan_entity_ids = orphan_result["orphan_entity_ids"] if orphan_result else []
+            orphan_count = orphan_result["orphan_count"] if orphan_result else 0
+
+            # Step 3: Delete orphaned entities and their relationships
+            if orphan_entity_ids:
+                delete_orphans_query = """
+                MATCH (e:Entity)
+                WHERE e.id IN $orphan_ids
+                DETACH DELETE e
+                RETURN COUNT(e) AS entities_deleted
+                """
+                orphans_result = session.run(
+                    delete_orphans_query,
+                    orphan_ids=orphan_entity_ids
+                ).single()
+                entities_deleted = orphans_result["entities_deleted"] if orphans_result else 0
+            else:
+                entities_deleted = 0
+
+            # Step 4: For non-orphaned entities, just remove the MENTIONED_IN relationships
+            # to this document's text units and decrement mention_count
+            update_entities_query = """
+            MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)
+            <-[r:MENTIONED_IN]-(e:Entity)
+            WHERE NOT e.id IN $orphan_ids
+            DELETE r
+            WITH e
+            SET e.mention_count = CASE
+                WHEN e.mention_count > 1 THEN e.mention_count - 1
+                ELSE 1
+            END
+            RETURN COUNT(DISTINCT e) AS entities_updated
+            """
+            update_result = session.run(
+                update_entities_query,
+                document_id=document_id,
+                orphan_ids=orphan_entity_ids
+            ).single()
+            entities_updated = update_result["entities_updated"] if update_result else 0
+
+            # Step 5: Delete TextUnit nodes (this will also delete PART_OF relationships)
+            textunits_query = """
+            MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)
+            DETACH DELETE t
+            RETURN COUNT(t) AS textunits_deleted
+            """
+            textunits_result = session.run(textunits_query, document_id=document_id).single()
+            textunits_deleted = textunits_result["textunits_deleted"] if textunits_result else 0
+
+            logger.info(
+                f"✅ Deleted graph data for document {document_id}: "
+                f"{textunits_deleted} text units, {entities_deleted} orphaned entities, "
+                f"{entities_updated} entities updated, {claims_deleted} claims"
+            )
+
+            return {
+                "status": "success",
+                "textunits_deleted": textunits_deleted,
+                "entities_deleted": entities_deleted,
+                "entities_affected": entities_updated + entities_deleted,
+                "claims_deleted": claims_deleted,
+            }
+
+        except Exception as e:
+            logger.error(f"Error deleting document graph data: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "textunits_deleted": 0,
+                "entities_deleted": 0,
+                "entities_affected": 0,
+                "claims_deleted": 0,
+            }
+
+    def update_entity(
+        self,
+        entity_id: str,
+        name: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        description: Optional[str] = None,
+        confidence: Optional[float] = None,
+    ) -> bool:
+        """
+        Update an existing entity node
+        Used for incremental updates instead of recreating entities
+
+        Args:
+            entity_id: Entity ID to update
+            name: New entity name (optional)
+            entity_type: New entity type (optional)
+            description: New description (optional)
+            confidence: New confidence score (optional)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            session = self.get_session()
+
+            # Build SET clause dynamically based on provided parameters
+            set_clauses = ["e.updated_at = datetime()"]
+            params = {"entity_id": entity_id}
+
+            if name is not None:
+                set_clauses.append("e.name = $name")
+                params["name"] = name
+
+            if entity_type is not None:
+                set_clauses.append("e.type = $entity_type")
+                params["entity_type"] = entity_type
+
+            if description is not None:
+                set_clauses.append("e.description = $description")
+                params["description"] = description
+
+            if confidence is not None:
+                set_clauses.append(
+                    "e.confidence = CASE WHEN $confidence > e.confidence THEN $confidence ELSE e.confidence END"
+                )
+                params["confidence"] = confidence
+
+            query = f"""
+            MATCH (e:Entity {{id: $entity_id}})
+            SET {', '.join(set_clauses)}
+            RETURN e.id as id
+            """
+
+            result = session.run(query, **params)
+
+            if result.single():
+                logger.info(f"Updated entity {entity_id}")
+                return True
+
+            logger.warning(f"Entity {entity_id} not found for update")
+            return False
+
+        except Exception as e:
+            logger.error(f"Entity update error: {e}")
+            return False
+
+    def update_document_node_status(
+        self,
+        document_id: str,
+        status: str,
+    ) -> bool:
+        """
+        Update document node status in Neo4j
+
+        Args:
+            document_id: Document ID
+            status: New status (pending, processing, completed, failed)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            session = self.get_session()
+
+            query = """
+            MATCH (d:Document {id: $document_id})
+            SET d.status = $status,
+                d.updated_at = datetime()
+            RETURN d.id as id
+            """
+
+            result = session.run(
+                query,
+                document_id=document_id,
+                status=status,
+            )
+
+            return result.single() is not None
+
+        except Exception as e:
+            logger.error(f"Document status update error: {e}")
+            return False
 
     def close(self):
         """Close graph session"""

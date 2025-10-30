@@ -43,6 +43,23 @@ class Settings:
     GOOGLE_API_KEY: Optional[str] = os.getenv("GOOGLE_API_KEY")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
+    # ========== QUERY PROCESSING CONFIG ==========
+    # Map-Reduce settings for global search optimization
+    ENABLE_MAPREDUCE: bool = os.getenv("ENABLE_MAPREDUCE", "True").lower() == "true"
+    MAPREDUCE_BATCH_SIZE: int = int(os.getenv("MAPREDUCE_BATCH_SIZE", "10"))
+    # Threshold for using Map-Reduce (number of communities)
+    MAPREDUCE_THRESHOLD: int = int(os.getenv("MAPREDUCE_THRESHOLD", "20"))
+
+    # ========== ENTITY RESOLUTION CONFIG ==========
+    # Enable automatic entity resolution during document processing
+    ENABLE_ENTITY_RESOLUTION: bool = os.getenv("ENABLE_ENTITY_RESOLUTION", "False").lower() == "true"
+    # Similarity threshold for fuzzy matching (0.0-1.0)
+    ENTITY_SIMILARITY_THRESHOLD: float = float(os.getenv("ENTITY_SIMILARITY_THRESHOLD", "0.85"))
+    # Use LLM for ambiguous entity resolution (more accurate but slower)
+    ENABLE_LLM_ENTITY_RESOLUTION: bool = os.getenv("ENABLE_LLM_ENTITY_RESOLUTION", "False").lower() == "true"
+    # Automatically merge entities above this confidence threshold (0.0-1.0)
+    AUTO_MERGE_CONFIDENCE_THRESHOLD: float = float(os.getenv("AUTO_MERGE_CONFIDENCE_THRESHOLD", "0.95"))
+
     # ========== DOCUMENT PROCESSING CONFIG ==========
     # Direct MD file processing - no external services needed
 

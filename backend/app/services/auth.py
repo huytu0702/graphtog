@@ -49,8 +49,9 @@ def get_current_user(
     if not user:
         logger.error(f"❌ User not found for ID: {token_data.sub}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     logger.info(f"✅ User authenticated: {user.email}")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -18,7 +18,7 @@ interface QueryResult {
 }
 
 interface Document {
-  id: number;
+  id: string;
   filename: string;
   status: string;
 }
@@ -32,13 +32,27 @@ export default function QueryInterface({ accessToken, documents = [] }: QueryInt
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<QueryResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
 
-  // Auto-select the most recent completed document
-  const completedDocs = documents.filter(doc => doc.status === 'completed');
-  if (completedDocs.length > 0 && selectedDocumentId === null) {
-    setSelectedDocumentId(completedDocs[0].id);
-  }
+  const completedDocs = useMemo(
+    () => documents.filter((doc) => doc.status === 'completed'),
+    [documents]
+  );
+
+  useEffect(() => {
+    if (completedDocs.length === 0) {
+      setSelectedDocumentId(null);
+      return;
+    }
+
+    const hasSelected = selectedDocumentId
+      ? completedDocs.some((doc) => doc.id === selectedDocumentId)
+      : false;
+
+    if (!hasSelected) {
+      setSelectedDocumentId(completedDocs[0].id);
+    }
+  }, [completedDocs, selectedDocumentId]);
 
   const formatLabel = (key: string) =>
     key
@@ -67,15 +81,27 @@ export default function QueryInterface({ accessToken, documents = [] }: QueryInt
         headers['Authorization'] = `Bearer ${accessToken}`;
       }
 
+      const payload: Record<string, unknown> = {
+        query,
+        hop_limit: 1,
+      };
+
+      if (selectedDocumentId) {
+        payload.document_id = selectedDocumentId;
+      }
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/queries`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          query: query,
-          hop_limit: 1,
-          document_id: selectedDocumentId
-        }),
+        body: JSON.stringify(payload),
       });
+
+      if (response.status === 401) {
+        // Token is invalid or expired, sign out and redirect
+        await fetch('/api/auth/signout', { method: 'POST' });
+        window.location.href = '/login?error=session_expired';
+        return;
+      }
 
       const data = await response.json();
 
@@ -121,7 +147,7 @@ export default function QueryInterface({ accessToken, documents = [] }: QueryInt
             <select
               id="document-select"
               value={selectedDocumentId || ''}
-              onChange={(e) => setSelectedDocumentId(Number(e.target.value))}
+              onChange={(e) => setSelectedDocumentId(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={loading}
             >

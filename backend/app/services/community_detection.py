@@ -402,6 +402,220 @@ class CommunityDetectionService:
             logger.error(f"Failed to find community path: {str(e)}")
             return {"status": "error", "message": str(e)}
 
+    def detect_communities_incrementally(
+        self,
+        affected_entity_ids: List[str],
+        seed: int = 42,
+    ) -> Dict[str, Any]:
+        """
+        Perform incremental community detection for affected entities only
+        More efficient than full recomputation for document updates
+
+        Strategy:
+        1. Remove old community assignments for affected entities
+        2. Get neighboring entities (1-hop) that might be affected
+        3. Run community detection on affected subgraph
+        4. Update community assignments
+
+        Args:
+            affected_entity_ids: List of entity IDs that need community recomputation
+            seed: Random seed for reproducibility
+
+        Returns:
+            Dictionary with incremental detection results
+        """
+        try:
+            session = self.get_session()
+
+            if not affected_entity_ids or len(affected_entity_ids) == 0:
+                return {
+                    "status": "success",
+                    "message": "No affected entities, skipping incremental detection",
+                    "communities_recomputed": 0,
+                }
+
+            logger.info(f"Starting incremental community detection for {len(affected_entity_ids)} entities...")
+
+            # Step 1: Get old communities to mark as stale
+            old_communities_query = """
+            MATCH (e:Entity)-[:IN_COMMUNITY]->(c:Community)
+            WHERE e.id IN $entity_ids
+            RETURN COLLECT(DISTINCT c.id) AS old_community_ids
+            """
+            old_result = session.run(
+                old_communities_query,
+                entity_ids=affected_entity_ids
+            ).single()
+            old_community_ids = old_result["old_community_ids"] if old_result else []
+
+            # Step 2: Remove old community assignments for affected entities
+            remove_query = """
+            MATCH (e:Entity)-[r:IN_COMMUNITY]->(:Community)
+            WHERE e.id IN $entity_ids
+            DELETE r
+            RETURN COUNT(r) AS relationships_removed
+            """
+            remove_result = session.run(
+                remove_query,
+                entity_ids=affected_entity_ids
+            ).single()
+            relationships_removed = remove_result["relationships_removed"] if remove_result else 0
+
+            logger.info(f"Removed {relationships_removed} old community assignments")
+
+            # Step 3: Get expanded set of entities (affected + 1-hop neighbors)
+            # This ensures community boundaries are properly recomputed
+            expanded_entities_query = """
+            MATCH (e:Entity)
+            WHERE e.id IN $entity_ids
+
+            // Get 1-hop neighbors
+            OPTIONAL MATCH (e)-[r:RELATED_TO|MENTIONED_IN]-(neighbor:Entity)
+
+            WITH COLLECT(DISTINCT e.id) + COLLECT(DISTINCT neighbor.id) AS all_entity_ids
+            UNWIND all_entity_ids AS entity_id
+            WITH DISTINCT entity_id
+            WHERE entity_id IS NOT NULL
+
+            RETURN COLLECT(entity_id) AS expanded_entity_ids
+            """
+            expanded_result = session.run(
+                expanded_entities_query,
+                entity_ids=affected_entity_ids
+            ).single()
+            expanded_entity_ids = expanded_result["expanded_entity_ids"] if expanded_result else affected_entity_ids
+
+            logger.info(
+                f"Expanded from {len(affected_entity_ids)} to {len(expanded_entity_ids)} entities "
+                f"(including neighbors)"
+            )
+
+            # Step 4: Create temporary subgraph projection for affected entities
+            subgraph_name = f"affected_subgraph_{seed}"
+
+            # Drop existing subgraph if exists
+            try:
+                session.run(f"CALL gds.graph.drop('{subgraph_name}')")
+            except:
+                pass
+
+            # Create subgraph projection
+            subgraph_query = f"""
+            CALL gds.graph.project.cypher(
+                '{subgraph_name}',
+                'MATCH (e:Entity) WHERE e.id IN $entity_ids RETURN id(e) AS id',
+                'MATCH (e1:Entity)-[r:RELATED_TO|MENTIONED_IN]-(e2:Entity)
+                 WHERE e1.id IN $entity_ids AND e2.id IN $entity_ids
+                 RETURN id(e1) AS source, id(e2) AS target'
+            )
+            YIELD graphName, nodeCount, relationshipCount
+            RETURN graphName, nodeCount, relationshipCount
+            """
+
+            subgraph_result = session.run(
+                subgraph_query,
+                entity_ids=expanded_entity_ids
+            ).single()
+
+            if not subgraph_result or subgraph_result["nodeCount"] == 0:
+                logger.warning("No entities found for incremental community detection")
+                return {
+                    "status": "success",
+                    "message": "No entities to process",
+                    "communities_recomputed": 0,
+                }
+
+            logger.info(
+                f"Created subgraph: {subgraph_result['nodeCount']} nodes, "
+                f"{subgraph_result['relationshipCount']} relationships"
+            )
+
+            # Step 5: Run Leiden on subgraph
+            leiden_query = f"""
+            CALL gds.leiden.stream(
+                '{subgraph_name}',
+                {{
+                    randomSeed: $seed,
+                    includeIntermediateCommunities: false,
+                    tolerance: 0.0001,
+                    maxLevels: 10,
+                    concurrency: 4
+                }}
+            )
+            YIELD nodeId, communityId
+            WITH gds.util.asNode(nodeId) AS node, communityId
+            RETURN node.id AS entity_id, communityId
+            """
+
+            leiden_results = session.run(leiden_query, seed=seed).data()
+
+            # Step 6: Store new community assignments
+            communities_created = set()
+            for result in leiden_results:
+                entity_id = result["entity_id"]
+                community_id = result["communityId"]
+                communities_created.add(community_id)
+
+                # Create/update community and relationship
+                update_query = """
+                MATCH (e:Entity {id: $entity_id})
+                MERGE (c:Community {id: $community_id})
+                ON CREATE SET
+                    c.createdAt = datetime(),
+                    c.level = 0,
+                    c.summary = ""
+                MERGE (e)-[r:IN_COMMUNITY]->(c)
+                SET r.confidence = 0.95,
+                    r.timestamp = datetime(),
+                    r.community_level = 0
+                """
+
+                session.run(
+                    update_query,
+                    entity_id=entity_id,
+                    community_id=community_id
+                )
+
+            # Step 7: Clean up subgraph
+            try:
+                session.run(f"CALL gds.graph.drop('{subgraph_name}')")
+            except:
+                pass
+
+            # Step 8: Remove orphaned communities (communities with no members)
+            cleanup_query = """
+            MATCH (c:Community)
+            WHERE NOT EXISTS((c)<-[:IN_COMMUNITY]-())
+            DELETE c
+            RETURN COUNT(c) AS orphaned_communities_removed
+            """
+            cleanup_result = session.run(cleanup_query).single()
+            orphaned_removed = cleanup_result["orphaned_communities_removed"] if cleanup_result else 0
+
+            if orphaned_removed > 0:
+                logger.info(f"Removed {orphaned_removed} orphaned communities")
+
+            logger.info(
+                f"✅ Incremental community detection complete: "
+                f"{len(communities_created)} communities created/updated"
+            )
+
+            return {
+                "status": "success",
+                "communities_recomputed": len(communities_created),
+                "entities_processed": len(expanded_entity_ids),
+                "old_communities_affected": len(old_community_ids),
+                "orphaned_communities_removed": orphaned_removed,
+            }
+
+        except Exception as e:
+            logger.error(f"Incremental community detection failed: {str(e)}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "communities_recomputed": 0,
+            }
+
 
 # Singleton instance
 community_detection_service = CommunityDetectionService()

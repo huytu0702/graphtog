@@ -14,10 +14,16 @@ from google.api_core import retry
 
 from app.config import get_settings
 from app.services.prompt import (
+    DEFAULT_COMPLETION_DELIMITER,
+    DEFAULT_RECORD_DELIMITER,
+    DEFAULT_TUPLE_DELIMITER,
+    build_claims_extraction_prompt,
     build_community_summary_prompt,
     build_contextual_answer_prompt,
     build_entity_extraction_prompt,
     build_graph_community_summary_prompt,
+    build_map_reduce_batch_summary_prompt,
+    build_map_reduce_final_synthesis_prompt,
     build_query_classification_prompt,
     build_relationship_extraction_prompt,
 )
@@ -99,6 +105,114 @@ class LLMService:
         logger.error(f"Failed to parse response as JSON: {response[:200]}")
         return {}
 
+    @staticmethod
+    def _parse_graph_extraction_response(response: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Parse GraphRAG tuple-based extraction output into structured entities and relationships.
+
+        Returns:
+            Tuple of (entities, relationships)
+        """
+        if not response:
+            return [], []
+
+        # Strip code fences if present
+        text = response.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            content_lines = []
+            in_block = False
+            for line in lines:
+                if line.strip().startswith("```"):
+                    in_block = not in_block
+                    continue
+                if in_block:
+                    content_lines.append(line)
+            text = "\n".join(content_lines).strip() if content_lines else text
+
+        if not text:
+            return [], []
+
+        text = text.replace("\r\n", "\n")
+        text = text.replace(DEFAULT_COMPLETION_DELIMITER, " ").strip()
+
+        records: List[str] = []
+        buffer: List[str] = []
+        for line in text.split(DEFAULT_RECORD_DELIMITER):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped == DEFAULT_COMPLETION_DELIMITER.strip():
+                break
+
+            if stripped.startswith("("):
+                if buffer:
+                    record = " ".join(buffer).strip()
+                    if record.startswith("(") and record.endswith(")"):
+                        records.append(record)
+                buffer = [stripped]
+            elif buffer:
+                buffer.append(stripped)
+            else:
+                continue
+
+            if stripped.endswith(")") and buffer:
+                record = " ".join(buffer).strip()
+                if record.startswith("(") and record.endswith(")"):
+                    records.append(record)
+                buffer = []
+
+        if buffer:
+            record = " ".join(buffer).strip()
+            if record.startswith("(") and record.endswith(")"):
+                records.append(record)
+
+        entities: List[Dict[str, Any]] = []
+        relationships: List[Dict[str, Any]] = []
+
+        for record in records:
+            normalized = record
+            if normalized.startswith("(") and normalized.endswith(")"):
+                normalized = normalized[1:-1]
+            parts = [part.strip().strip('"').strip("'") for part in normalized.split(DEFAULT_TUPLE_DELIMITER)]
+            if len(parts) < 4:
+                continue
+
+            record_type = parts[0].lower()
+            if record_type == "entity":
+                entity_name = parts[1]
+                entity_type = parts[2]
+                description = parts[3]
+                entity = {
+                    "name": entity_name,
+                    "type": entity_type.upper(),
+                    "description": description,
+                    "context": description,
+                    "confidence": 0.8,
+                }
+                entities.append(entity)
+            elif record_type == "relationship" and len(parts) >= 5:
+                source_entity = parts[1]
+                target_entity = parts[2]
+                relationship_description = parts[3]
+                strength_raw = parts[4]
+                try:
+                    strength_value = float(strength_raw)
+                except ValueError:
+                    strength_value = 5.0
+
+                relationship = {
+                    "source": source_entity,
+                    "target": target_entity,
+                    "description": relationship_description,
+                    "type": "RELATED_TO",
+                    "confidence": max(0.0, min(strength_value / 10.0, 1.0)),
+                    "strength": strength_value,
+                }
+                relationships.append(relationship)
+
+        return entities, relationships
+
     def extract_entities(self, text: str, chunk_id: str) -> Dict[str, Any]:
         """
         Extract entities from text using Gemini
@@ -117,10 +231,16 @@ class LLMService:
             return response.text
 
         response_text = self._retry_with_backoff(call_llm)
+        entities, _ = self._parse_graph_extraction_response(response_text)
+
         try:
-            entities = self._parse_json_response(response_text)
-            if isinstance(entities, dict):
-                entities = entities.get("entities", [])
+            if not entities:
+                parsed = self._parse_json_response(response_text)
+                if isinstance(parsed, dict):
+                    entities = parsed.get("entities", [])
+                elif isinstance(parsed, list):
+                    entities = parsed
+
             return {
                 "chunk_id": chunk_id,
                 "entities": entities,
@@ -157,10 +277,25 @@ class LLMService:
             return response.text
 
         response_text = self._retry_with_backoff(call_llm)
+        _, relationships = self._parse_graph_extraction_response(response_text)
+
         try:
-            relationships = self._parse_json_response(response_text)
-            if isinstance(relationships, dict):
-                relationships = relationships.get("relationships", [])
+            if entity_names:
+                entity_name_set = {name.strip() for name in entity_names if name and isinstance(name, str)}
+                if entity_name_set:
+                    relationships = [
+                        rel
+                        for rel in relationships
+                        if rel.get("source") in entity_name_set and rel.get("target") in entity_name_set
+                    ]
+
+            if not relationships:
+                parsed = self._parse_json_response(response_text)
+                if isinstance(parsed, dict):
+                    relationships = parsed.get("relationships", [])
+                elif isinstance(parsed, list):
+                    relationships = parsed
+
             return {
                 "chunk_id": chunk_id,
                 "relationships": relationships,
@@ -205,6 +340,154 @@ class LLMService:
         for text, entities, chunk_id in chunks_with_entities:
             if entities:  # Only extract if there are entities
                 result = self.extract_relationships(text, entities, chunk_id)
+                results.append(result)
+            await asyncio.sleep(0.1)
+        return results
+
+    def extract_claims(
+        self,
+        text: str,
+        entities: List[Dict],
+        chunk_id: str,
+        entity_specs: Optional[str] = None,
+        claim_description: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Extract claims from text using GraphRAG claims extraction
+
+        Args:
+            text: Original text to extract claims from
+            entities: Previously extracted entities
+            chunk_id: Identifier for the text chunk
+            entity_specs: Entity specification (optional, defaults to entity names)
+            claim_description: Description of claims to extract (optional)
+
+        Returns:
+            Dict with extracted claims
+        """
+        try:
+            # Use entity names as entity specs if not provided
+            if not entity_specs and entities:
+                entity_names = [e.get("name", "") for e in entities if e.get("name")]
+                entity_specs = ", ".join(entity_names) if entity_names else "organization, person, event"
+
+            prompt = build_claims_extraction_prompt(
+                input_text=text,
+                entity_specs=entity_specs,
+                claim_description=claim_description,
+            )
+
+            self._apply_rate_limit()
+
+            def call_llm():
+                model = genai.GenerativeModel(self.model_name)
+                response = model.generate_content(prompt)
+                return response.text
+
+            response_text = self._retry_with_backoff(call_llm)
+
+            # Parse claims from GraphRAG tuple format
+            claims = self._parse_claims_response(response_text)
+
+            return {
+                "chunk_id": chunk_id,
+                "claims": claims,
+                "status": "success",
+            }
+
+        except Exception as e:
+            logger.error(f"Claims extraction error: {e}")
+            return {
+                "chunk_id": chunk_id,
+                "claims": [],
+                "status": "error",
+                "error": str(e),
+            }
+
+    def _parse_claims_response(self, response: str) -> List[Dict[str, Any]]:
+        """
+        Parse claims from GraphRAG tuple-based format
+
+        Expected format:
+        (SUBJECT<|>OBJECT<|>CLAIM_TYPE<|>STATUS<|>START_DATE<|>END_DATE<|>DESCRIPTION<|>SOURCE_TEXT)##
+        (SUBJECT2<|>OBJECT2<|>CLAIM_TYPE2<|>STATUS2<|>START_DATE2<|>END_DATE2<|>DESCRIPTION2<|>SOURCE_TEXT2)##
+
+        Args:
+            response: LLM response text with claims in tuple format
+
+        Returns:
+            List of claim dictionaries
+        """
+        claims = []
+
+        try:
+            # Remove completion delimiter if present
+            response = response.replace(DEFAULT_COMPLETION_DELIMITER, "")
+            response = response.strip()
+
+            # Split by record delimiter
+            claim_records = response.split(DEFAULT_RECORD_DELIMITER)
+
+            for record in claim_records:
+                record = record.strip()
+                if not record:
+                    continue
+
+                # Remove parentheses
+                if record.startswith("(") and record.endswith(")"):
+                    record = record[1:-1]
+
+                # Split by tuple delimiter
+                parts = record.split(DEFAULT_TUPLE_DELIMITER)
+
+                if len(parts) >= 8:  # Ensure we have all required fields
+                    claim = {
+                        "subject": parts[0].strip(),
+                        "object": parts[1].strip(),
+                        "claim_type": parts[2].strip(),
+                        "status": parts[3].strip(),
+                        "start_date": parts[4].strip() if parts[4].strip() != "NONE" else None,
+                        "end_date": parts[5].strip() if parts[5].strip() != "NONE" else None,
+                        "description": parts[6].strip(),
+                        "source_text": parts[7].strip() if len(parts) > 7 else "",
+                    }
+                    claims.append(claim)
+                else:
+                    logger.warning(f"Malformed claim record (expected 8 fields, got {len(parts)}): {record[:100]}")
+
+        except Exception as e:
+            logger.error(f"Claims parsing error: {e}")
+
+        logger.info(f"Parsed {len(claims)} claims from response")
+        return claims
+
+    async def batch_extract_claims(
+        self,
+        chunks_with_entities: List[Tuple[str, List[Dict], str]],
+        entity_specs: Optional[str] = None,
+        claim_description: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Batch extract claims from multiple chunks
+
+        Args:
+            chunks_with_entities: List of (text, entities, chunk_id) tuples
+            entity_specs: Entity specification (optional)
+            claim_description: Description of claims to extract (optional)
+
+        Returns:
+            List of extraction results
+        """
+        results = []
+        for text, entities, chunk_id in chunks_with_entities:
+            if entities:  # Only extract if there are entities
+                result = self.extract_claims(
+                    text=text,
+                    entities=entities,
+                    chunk_id=chunk_id,
+                    entity_specs=entity_specs,
+                    claim_description=claim_description,
+                )
                 results.append(result)
             await asyncio.sleep(0.1)
         return results
@@ -338,6 +621,138 @@ class LLMService:
                 "summary": "Summary generation failed",
                 "themes": [],
                 "focus_area": "Error",
+            }
+
+    def summarize_community_batch(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Map phase: Summarize a batch of communities for a specific query
+
+        Args:
+            query: User's question
+            communities: List of community dicts with id, summary, themes, size
+
+        Returns:
+            Dict with batch summary and relevant communities
+        """
+        try:
+            # Format communities info
+            communities_parts = []
+            for comm in communities:
+                comm_text = f"**Community {comm['community_id']}** (Level {comm.get('level', 0)}, {comm['size']} entities)"
+                if comm.get('summary'):
+                    comm_text += f"\n  Summary: {comm['summary']}"
+                if comm.get('themes'):
+                    comm_text += f"\n  Themes: {comm['themes']}"
+                communities_parts.append(comm_text)
+
+            communities_info = "\n\n".join(communities_parts)
+
+            # Build prompt
+            prompt = build_map_reduce_batch_summary_prompt(query, communities_info)
+
+            # Apply rate limiting
+            self._apply_rate_limit()
+
+            # Call LLM
+            def call_llm():
+                model = genai.GenerativeModel(self.model_name)
+                response = model.generate_content(prompt)
+                return response.text
+
+            response_text = self._retry_with_backoff(call_llm)
+
+            # Parse JSON response
+            result = self._parse_json_response(response_text)
+
+            return {
+                "status": "success",
+                "batch_summary": result.get("summary", ""),
+                "key_points": result.get("key_points", []),
+                "relevant_communities": result.get("relevant_communities", []),
+                "confidence": result.get("confidence", "medium"),
+            }
+
+        except Exception as e:
+            logger.error(f"Batch summarization failed: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "batch_summary": "",
+                "key_points": [],
+                "relevant_communities": [],
+                "confidence": "low",
+            }
+
+    def synthesize_final_answer(
+        self,
+        query: str,
+        intermediate_summaries: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Reduce phase: Synthesize intermediate summaries into final answer
+
+        Args:
+            query: User's question
+            intermediate_summaries: List of batch summaries from Map phase
+
+        Returns:
+            Dict with final answer and metadata
+        """
+        try:
+            # Format intermediate summaries
+            summaries_parts = []
+            for i, summary in enumerate(intermediate_summaries, 1):
+                if summary.get("status") == "success":
+                    text = f"**Batch {i}** (Confidence: {summary.get('confidence', 'medium')})"
+                    text += f"\n{summary.get('batch_summary', '')}"
+                    if summary.get('key_points'):
+                        text += "\nKey Points:\n" + "\n".join([f"- {p}" for p in summary['key_points']])
+                    if summary.get('relevant_communities'):
+                        text += f"\nRelevant Communities: {', '.join(map(str, summary['relevant_communities']))}"
+                    summaries_parts.append(text)
+
+            summaries_text = "\n\n".join(summaries_parts)
+
+            # Build prompt
+            prompt = build_map_reduce_final_synthesis_prompt(query, summaries_text)
+
+            # Apply rate limiting
+            self._apply_rate_limit()
+
+            # Call LLM
+            def call_llm():
+                model = genai.GenerativeModel(self.model_name)
+                response = model.generate_content(prompt)
+                return response.text
+
+            response_text = self._retry_with_backoff(call_llm)
+
+            # Parse JSON response
+            result = self._parse_json_response(response_text)
+
+            return {
+                "status": "success",
+                "answer": result.get("answer", ""),
+                "key_insights": result.get("key_insights", []),
+                "supporting_communities": result.get("supporting_communities", []),
+                "confidence_score": str(result.get("confidence_score", "0.7")),
+                "limitations": result.get("limitations", ""),
+            }
+
+        except Exception as e:
+            logger.error(f"Final synthesis failed: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "answer": "Failed to synthesize final answer from intermediate summaries.",
+                "key_insights": [],
+                "supporting_communities": [],
+                "confidence_score": "0.0",
+                "limitations": str(e),
             }
 
 

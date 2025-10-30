@@ -10,10 +10,14 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface Document {
-  id: number;
+  id: string;
   filename: string;
   status: string;
   created_at: string;
+  updated_at: string;
+  version: number;
+  last_processed_at?: string | null;
+  content_hash?: string | null;
   error_message?: string | null;
 }
 
@@ -79,6 +83,13 @@ export default function DashboardHomeClient({ session }: { session: Session }) {
         redirect: 'follow',
       });
 
+      if (response.status === 401) {
+        // Token is invalid or expired, sign out and redirect
+        await fetch('/api/auth/signout', { method: 'POST' });
+        window.location.href = '/login?error=session_expired';
+        return;
+      }
+
       if (!response.ok) {
         throw new Error('Failed to fetch documents');
       }
@@ -115,6 +126,12 @@ export default function DashboardHomeClient({ session }: { session: Session }) {
 
   // Get access token from session
   const accessToken = (session?.user as any)?.accessToken;
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return '--';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '--' : date.toLocaleString();
+  };
 
   return (
     <>
@@ -200,7 +217,10 @@ export default function DashboardHomeClient({ session }: { session: Session }) {
                           </div>
                           <p className="mt-2 text-xs text-gray-500">{statusMeta.description}</p>
                           <p className="mt-1 text-xs text-gray-400">
-                            {new Date(doc.created_at).toLocaleString()}
+                            Version {doc.version} - Last processed {formatDateTime(doc.last_processed_at)}
+                          </p>
+                          <p className="mt-1 text-[11px] text-gray-400">
+                            Created {formatDateTime(doc.created_at)} - Updated {formatDateTime(doc.updated_at)}
                           </p>
                           {doc.error_message && (
                             <p className="mt-2 text-xs text-rose-600">{doc.error_message}</p>

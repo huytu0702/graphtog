@@ -51,11 +51,10 @@ export default function DocumentUpload({ onUploadSuccess, accessToken }: Documen
       } else {
         const error = await response.json();
         // Handle token expiration specifically
-        if (response.status === 401 && error.detail === 'Invalid token') {
-          setUploadStatus({
-            success: false,
-            message: 'Session expired. Please refresh the page and log in again.'
-          });
+        if (response.status === 401) {
+          // Sign out and redirect to login
+          await fetch('/api/auth/signout', { method: 'POST' });
+          window.location.href = '/login?error=session_expired';
         } else {
           setUploadStatus({ success: false, message: error.detail || 'Upload failed' });
         }

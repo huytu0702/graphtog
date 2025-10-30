@@ -15,6 +15,9 @@ from app.services.query_service import query_service
 from app.services.graph_service import graph_service
 from app.services.auth import get_current_user
 from app.models.user import User
+from app.config import get_settings
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -260,42 +263,70 @@ async def process_global_query(
     request: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    use_mapreduce: Optional[bool] = QueryParam(None, description="Force Map-Reduce (auto if None)"),
 ) -> Dict:
     """
     Process a global/holistic query using community summaries (GraphRAG Global Search)
-    
+
+    Automatically uses Map-Reduce optimization when number of communities exceeds threshold.
+
     Best for:
     - Dataset-wide questions ("What are the main themes?")
     - High-level insights ("Summarize the key topics")
     - Holistic understanding ("What is this dataset about?")
-    
+
     Args:
-        request: Dict with "query" text
+        request: Dict with "query" text and optional "batch_size"
         current_user: Current authenticated user
         db: Database session
-        
+        use_mapreduce: Force Map-Reduce on/off (auto-detect if None)
+
     Returns:
         Query result with community summaries and answer
     """
     try:
         query_text = request.get("query", "").strip()
+        batch_size = request.get("batch_size", settings.MAPREDUCE_BATCH_SIZE)
         user_id = current_user.id
-        
+
         if not query_text:
             raise HTTPException(status_code=400, detail="Query cannot be empty")
-        
+
         if len(query_text) > 1000:
             raise HTTPException(status_code=400, detail="Query too long (max 1000 characters)")
-        
-        # Process global query
-        logger.info(f"Processing global query for user {user_id}: {query_text}")
-        result = query_service.process_global_query(query_text)
-        
+
+        # Determine whether to use Map-Reduce
+        should_use_mapreduce = use_mapreduce
+
+        if should_use_mapreduce is None and settings.ENABLE_MAPREDUCE:
+            # Auto-detect: check number of communities
+            stats = graph_service.get_graph_statistics()
+            num_communities = stats.get("communities", 0)
+            should_use_mapreduce = num_communities >= settings.MAPREDUCE_THRESHOLD
+            logger.info(
+                f"Auto-detected {num_communities} communities, "
+                f"using Map-Reduce: {should_use_mapreduce} "
+                f"(threshold: {settings.MAPREDUCE_THRESHOLD})"
+            )
+
+        # Process global query with appropriate method
+        logger.info(
+            f"Processing global query for user {user_id} "
+            f"(Map-Reduce: {should_use_mapreduce}): {query_text}"
+        )
+
+        if should_use_mapreduce:
+            result = query_service.process_global_query_with_mapreduce(
+                query_text, batch_size=batch_size
+            )
+        else:
+            result = query_service.process_global_query(query_text)
+
         if result.get("status") == "error":
             error_message = result.get("error", "Unknown error")
             logger.error(f"Global query failed: {error_message}")
             raise HTTPException(status_code=500, detail=error_message)
-        
+
         # Store query in database
         try:
             db_query = Query(
@@ -304,7 +335,7 @@ async def process_global_query(
                 query_text=query_text,
                 response=result.get("answer", ""),
                 reasoning_chain=result.get("context", ""),
-                query_mode="global",
+                query_mode=result.get("query_type", "global"),
                 confidence_score=result.get("confidence_score", "0.0"),
             )
             db.add(db_query)
@@ -314,9 +345,9 @@ async def process_global_query(
         except Exception as e:
             logger.error(f"Error saving global query to database: {e}")
             db.rollback()
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -364,3 +395,171 @@ async def batch_process_queries(
     except Exception as e:
         logger.error(f"Batch query processing error: {e}")
         raise HTTPException(status_code=500, detail="Batch processing error")
+
+
+@router.get("/claims")
+async def get_all_claims(
+    claim_type: Optional[str] = QueryParam(None, description="Filter by claim type"),
+    status: Optional[str] = QueryParam(None, description="Filter by status (TRUE/FALSE/SUSPECTED)"),
+    limit: int = QueryParam(100, ge=1, le=500, description="Maximum number of claims"),
+    current_user: User = Depends(get_current_user),
+) -> Dict:
+    """
+    Get all claims in the graph with optional filters
+
+    Args:
+        claim_type: Filter by claim type (optional)
+        status: Filter by status (optional)
+        limit: Maximum number of claims to return
+        current_user: Current authenticated user
+
+    Returns:
+        List of claims with metadata
+    """
+    try:
+        logger.info(
+            f"User {current_user.id} requesting claims "
+            f"(type={claim_type}, status={status}, limit={limit})"
+        )
+
+        result = query_service.get_all_claims(
+            claim_type=claim_type,
+            status=status,
+            limit=limit,
+        )
+
+        if result.get("status") == "error":
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"Get claims failed: {error_message}")
+            raise HTTPException(status_code=500, detail=error_message)
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get claims error: {e}")
+        raise HTTPException(status_code=500, detail=f"Get claims error: {str(e)}")
+
+
+@router.get("/claims/entity/{entity_name}")
+async def get_claims_for_entity(
+    entity_name: str,
+    limit: int = QueryParam(20, ge=1, le=100, description="Maximum number of claims"),
+    current_user: User = Depends(get_current_user),
+) -> Dict:
+    """
+    Get all claims related to a specific entity
+
+    Args:
+        entity_name: Name of the entity
+        limit: Maximum number of claims to return
+        current_user: Current authenticated user
+
+    Returns:
+        List of claims for the entity
+    """
+    try:
+        logger.info(
+            f"User {current_user.id} requesting claims for entity: {entity_name}"
+        )
+
+        result = query_service.get_claims_for_entity(
+            entity_name=entity_name,
+            limit=limit,
+        )
+
+        if result.get("status") == "error":
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"Get claims for entity failed: {error_message}")
+            raise HTTPException(status_code=500, detail=error_message)
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get claims for entity error: {e}")
+        raise HTTPException(status_code=500, detail=f"Get claims error: {str(e)}")
+
+
+@router.post("/claims/query")
+async def query_claims(
+    request: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Dict:
+    """
+    Query claims with natural language and optional filters
+
+    Best for:
+    - Finding claims about specific entities
+    - Filtering claims by type or status
+    - Asking questions about extracted claims
+
+    Args:
+        request: Dict with "query" text and optional filters
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        Query result with filtered claims and answer
+    """
+    try:
+        query_text = request.get("query", "").strip()
+        entity_name = request.get("entity_name")
+        claim_type = request.get("claim_type")
+        status = request.get("status")
+        limit = request.get("limit", 20)
+        user_id = current_user.id
+
+        if not query_text:
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+        if len(query_text) > 1000:
+            raise HTTPException(status_code=400, detail="Query too long (max 1000 characters)")
+
+        logger.info(
+            f"Processing claims query for user {user_id}: {query_text} "
+            f"(entity={entity_name}, type={claim_type}, status={status})"
+        )
+
+        result = query_service.query_claims(
+            query=query_text,
+            entity_name=entity_name,
+            claim_type=claim_type,
+            status=status,
+            limit=limit,
+        )
+
+        if result.get("status") == "error":
+            error_message = result.get("error", "Unknown error")
+            logger.error(f"Claims query failed: {error_message}")
+            raise HTTPException(status_code=500, detail=error_message)
+
+        # Store query in database (optional)
+        try:
+            db_query = Query(
+                user_id=user_id,
+                document_id=None,
+                query_text=query_text,
+                response=result.get("answer", ""),
+                reasoning_chain=str(result.get("filters", "")),
+                query_mode="claims",
+                confidence_score="0.9",
+            )
+            db.add(db_query)
+            db.commit()
+            db.refresh(db_query)
+            result["id"] = str(db_query.id)
+        except Exception as e:
+            logger.error(f"Error saving claims query to database: {e}")
+            db.rollback()
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Claims query processing error: {e}")
+        raise HTTPException(status_code=500, detail=f"Claims query error: {str(e)}")

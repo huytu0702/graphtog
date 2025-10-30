@@ -5,7 +5,7 @@ Document model for PostgreSQL database
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String
+from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -36,6 +36,12 @@ class Document(Base):
     file_size = Column(BigInteger, nullable=True)  # File size in bytes
     file_type = Column(String(20), nullable=True)  # md
     error_message = Column(String(500), nullable=True)  # Error message if processing failed
+
+    # Incremental indexing fields
+    version = Column(Integer, nullable=False, default=1)  # Document version for tracking updates
+    content_hash = Column(String(64), nullable=True, index=True)  # SHA256 hash of content
+    last_processed_at = Column(DateTime, nullable=True)  # Last successful processing timestamp
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
