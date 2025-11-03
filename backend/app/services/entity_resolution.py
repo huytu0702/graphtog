@@ -237,14 +237,32 @@ Respond in JSON format:
 
             # Parse JSON response
             import json
+            import re
 
-            # Remove markdown code blocks if present
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
+            # Remove markdown code blocks using proper regex
+            if "```" in response_text:
+                # Extract content between code blocks
+                code_block_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+                matches = re.findall(code_block_pattern, response_text, re.DOTALL)
+                if matches:
+                    response_text = matches[0].strip()
+                else:
+                    # Fallback: remove all ``` markers
+                    response_text = re.sub(r'```[a-z]*\n?', '', response_text).strip()
+                    response_text = response_text.replace('```', '').strip()
+
+            # Remove any control characters
+            response_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', response_text)
+
+            # Check for empty response
+            if not response_text:
+                logger.warning("Empty response after cleaning")
+                return {
+                    "status": "error",
+                    "error": "Empty response from LLM",
+                    "are_same": False,
+                    "confidence": 0.0,
+                }
 
             result = json.loads(response_text.strip())
 
@@ -400,8 +418,13 @@ Respond in JSON format:
                     logger.info(f"Merged entity {dup_id} into {primary_entity_id}")
 
                 except Exception as e:
+                    # Handle constraint violation (entity already merged)
+                    if "ConstraintValidationFailed" in str(e) or "already exists" in str(e):
+                        logger.warning(f"Entity {dup_id} may already be merged or duplicate entity {primary_entity_id} already exists, skipping")
+                        # Still count as processed
+                        merged_count += 1
                     # If APOC is not available, fall back to simpler merge
-                    if "apoc" in str(e).lower():
+                    elif "apoc" in str(e).lower():
                         logger.warning("APOC not available, using simplified merge")
                         self._merge_entities_without_apoc(
                             session, primary_entity_id, dup_id
@@ -410,16 +433,48 @@ Respond in JSON format:
                     else:
                         logger.error(f"Error merging entity {dup_id}: {e}")
 
-            # Update canonical name if provided
+            # Update canonical name if provided and different from current name
             if canonical_name:
-                session.run(
+                # First check if the canonical name is different from the primary entity's current name
+                check_query = """
+                MATCH (e:Entity {id: $id})
+                RETURN e.name as current_name, e.type as entity_type
+                """
+                check_result = session.run(check_query, id=primary_entity_id).single()
+
+                if check_result and check_result["current_name"] != canonical_name:
+                    # Check if an entity with this canonical name already exists (different entity)
+                    conflict_check = """
+                    MATCH (e:Entity {name: $canonical_name, type: $entity_type})
+                    WHERE e.id <> $primary_id
+                    RETURN e.id as conflicting_id
                     """
-                    MATCH (e:Entity {id: $id})
-                    SET e.name = $canonical_name, e.updated_at = datetime()
-                    """,
-                    id=primary_entity_id,
-                    canonical_name=canonical_name
-                )
+                    conflict = session.run(
+                        conflict_check,
+                        canonical_name=canonical_name,
+                        entity_type=check_result["entity_type"],
+                        primary_id=primary_entity_id
+                    ).single()
+
+                    if conflict:
+                        logger.warning(
+                            f"Cannot update canonical name to '{canonical_name}' - "
+                            f"another entity already exists with this name (id: {conflict['conflicting_id']})"
+                        )
+                    else:
+                        # Safe to update - no conflict
+                        try:
+                            session.run(
+                                """
+                                MATCH (e:Entity {id: $id})
+                                SET e.name = $canonical_name, e.updated_at = datetime()
+                                """,
+                                id=primary_entity_id,
+                                canonical_name=canonical_name
+                            )
+                            logger.info(f"Updated canonical name to '{canonical_name}' for entity {primary_entity_id}")
+                        except Exception as e:
+                            logger.error(f"Unexpected error updating canonical name: {e}")
 
             logger.info(
                 f"Successfully merged {merged_count} entities into {primary_entity_id}"
@@ -434,7 +489,9 @@ Respond in JSON format:
             }
 
         except Exception as e:
-            logger.error(f"Entity merge error: {e}")
+            # Don't log constraint violations as errors - they're handled gracefully
+            if "ConstraintValidationFailed" not in str(e) and "already exists" not in str(e):
+                logger.error(f"Entity merge error: {e}")
             return {
                 "status": "error",
                 "error": str(e),

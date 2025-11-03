@@ -354,12 +354,14 @@ class GraphService:
                 query = """
                 MATCH (e:Entity {name: $name, type: $type})
                 RETURN e.id as id, e.name as name, e.type as type, e.description as description, e.confidence as confidence
+                LIMIT 1
                 """
                 result = session.run(query, name=name, type=entity_type)
             else:
                 query = """
                 MATCH (e:Entity {name: $name})
                 RETURN e.id as id, e.name as name, e.type as type, e.description as description, e.confidence as confidence
+                LIMIT 1
                 """
                 result = session.run(query, name=name)
 
@@ -442,15 +444,16 @@ class GraphService:
 
             # PART 1: Get related entities via semantic relationships (NOT IN_COMMUNITY)
             # This follows Microsoft GraphRAG's local search pattern
+            # Note: GraphRAG uses generic RELATED_TO relationships with descriptions, not typed relationships
             entity_query = """
             MATCH (e:Entity {id: $entity_id})
-            
-            // Get directly related entities via semantic relationships
-            OPTIONAL MATCH (e)-[r1:RELATED_TO|SUPPORTS|CAUSES|OPPOSES|MENTIONS|CONTAINS|PRECEDES|REQUIRED]-(related1:Entity)
-            
+
+            // Get directly related entities via RELATED_TO relationships
+            OPTIONAL MATCH (e)-[r1:RELATED_TO]-(related1:Entity)
+
             // Get 2-hop related entities if hop_limit >= 2
-            OPTIONAL MATCH (e)-[r1:RELATED_TO|SUPPORTS|CAUSES|OPPOSES|MENTIONS|CONTAINS|PRECEDES|REQUIRED]-
-                          (intermediate:Entity)-[r2:RELATED_TO|SUPPORTS|CAUSES|OPPOSES|MENTIONS|CONTAINS|PRECEDES|REQUIRED]-(related2:Entity)
+            OPTIONAL MATCH (e)-[r1:RELATED_TO]-
+                          (intermediate:Entity)-[r2:RELATED_TO]-(related2:Entity)
             WHERE $hop_limit >= 2
             
             WITH e, 
@@ -479,12 +482,13 @@ class GraphService:
                      relationship_type: type(rel_item.relationship)
                  }) AS related_entities
             
-            RETURN 
+            RETURN
                 e.id AS central_entity_id,
                 e.name AS central_entity_name,
                 e.type AS central_entity_type,
                 e.description AS central_entity_description,
                 related_entities
+            LIMIT 1
             """
 
             result = session.run(entity_query, entity_id=entity_id, hop_limit=hop_limit)
@@ -636,23 +640,29 @@ class GraphService:
         try:
             session = self.get_session()
 
-            # Generate claim ID using subject, object, type, and description
-            claim_key = f"{subject_entity_name}:{object_entity_name}:{claim_type}:{description}"
+            # Generate claim ID using subject, object, type, description, and source_text
+            # Include source_text to ensure uniqueness when same claim appears in different contexts
+            claim_key = f"{subject_entity_name}:{object_entity_name}:{claim_type}:{description}:{source_text or ''}"
             claim_id = hashlib.md5(claim_key.encode()).hexdigest()[:16]
 
+            # Use MERGE instead of CREATE to handle duplicates gracefully
+            # This follows Microsoft GraphRAG's approach of deduplicating claims
             query = """
-            CREATE (c:Claim {
-                id: $claim_id,
-                subject: $subject,
-                object: $object,
-                claim_type: $claim_type,
-                status: $status,
-                description: $description,
-                start_date: $start_date,
-                end_date: $end_date,
-                source_text: $source_text,
-                created_at: datetime()
-            })
+            MERGE (c:Claim {id: $claim_id})
+            ON CREATE SET
+                c.subject = $subject,
+                c.object = $object,
+                c.claim_type = $claim_type,
+                c.status = $status,
+                c.description = $description,
+                c.start_date = $start_date,
+                c.end_date = $end_date,
+                c.source_text = $source_text,
+                c.created_at = datetime(),
+                c.occurrence_count = 1
+            ON MATCH SET
+                c.occurrence_count = c.occurrence_count + 1,
+                c.updated_at = datetime()
             RETURN c.id as id
             """
 
@@ -669,15 +679,26 @@ class GraphService:
                 source_text=source_text,
             )
 
-            record = result.single()
-            if record:
-                logger.info(f"Created claim: {subject_entity_name} -> {claim_type}")
+            # Get first record - use data() to avoid single() warning if multiple records
+            records = list(result)
+            if records:
+                record = records[0]  # Get first record
+                if len(records) > 1:
+                    logger.debug(f"Query returned {len(records)} records for claim, using first one")
+                logger.info(f"Created/updated claim: {subject_entity_name} -> {claim_type}")
                 return record["id"]
-            return None
+            else:
+                logger.warning(f"No record returned for claim: {subject_entity_name} -> {claim_type}")
+                return None
 
         except Exception as e:
-            logger.error(f"Claim creation error: {e}")
-            return None
+            # Don't log constraint violations as errors since we handle them with MERGE
+            if "ConstraintValidationFailed" in str(e) or "already exists" in str(e):
+                logger.debug(f"Claim already exists (expected with MERGE): {subject_entity_name} -> {claim_type}")
+                return claim_id  # Return the claim_id even if it already exists
+            else:
+                logger.error(f"Claim creation error: {e}")
+                return None
 
     def link_claim_to_entities(
         self,
@@ -703,6 +724,82 @@ class GraphService:
         try:
             session = self.get_session()
 
+            # Helper function to find entity with fuzzy matching
+            def find_entity_fuzzy(entity_name: str) -> Optional[str]:
+                """
+                Find entity using fuzzy matching strategies:
+                1. Exact match
+                2. Case-insensitive match
+                3. Match without parentheses content (e.g., "NAME (ENGLISH)" -> "NAME")
+                4. Match with parentheses content stripped from both sides
+                """
+                # Strategy 1: Exact match
+                query_exact = """
+                MATCH (e:Entity {name: $name})
+                RETURN e.name AS matched_name
+                LIMIT 1
+                """
+                result = session.run(query_exact, name=entity_name)
+                records = list(result)
+                if records:
+                    return records[0]["matched_name"]
+
+                # Strategy 2: Case-insensitive match
+                query_case_insensitive = """
+                MATCH (e:Entity)
+                WHERE toLower(e.name) = toLower($name)
+                RETURN e.name AS matched_name
+                LIMIT 1
+                """
+                result = session.run(query_case_insensitive, name=entity_name)
+                records = list(result)
+                if records:
+                    return records[0]["matched_name"]
+
+                # Strategy 3: Strip parentheses from search term and try matching
+                # e.g., "THỬ NGHIỆM CÓ KIỂM SOÁT (REGULATORY SANDBOX)" -> "THỬ NGHIỆM CÓ KIỂM SOÁT"
+                import re
+                name_without_parens = re.sub(r'\s*\([^)]*\)\s*', '', entity_name).strip()
+                if name_without_parens != entity_name:
+                    query_no_parens = """
+                    MATCH (e:Entity)
+                    WHERE e.name = $name OR e.name STARTS WITH $name_prefix
+                    RETURN e.name AS matched_name
+                    LIMIT 1
+                    """
+                    result = session.run(
+                        query_no_parens,
+                        name=name_without_parens,
+                        name_prefix=name_without_parens
+                    )
+                    records = list(result)
+                    if records:
+                        return records[0]["matched_name"]
+
+                # Strategy 4: Match by stripping parentheses from database entities
+                query_db_no_parens = """
+                MATCH (e:Entity)
+                WITH e,
+                     replace(replace(e.name, '(', ''), ')', '') AS cleaned_name
+                WHERE cleaned_name CONTAINS $search_term OR $search_term CONTAINS cleaned_name
+                RETURN e.name AS matched_name
+                ORDER BY size(e.name) ASC
+                LIMIT 1
+                """
+                result = session.run(query_db_no_parens, search_term=name_without_parens)
+                records = list(result)
+                if records:
+                    return records[0]["matched_name"]
+
+                return None
+
+            # Find subject entity using fuzzy matching
+            matched_subject = find_entity_fuzzy(subject_entity_name)
+
+            if not matched_subject:
+                logger.warning(f"Failed to link subject entity {subject_entity_name} to claim")
+                return False
+
             # Link subject entity to claim (MAKES_CLAIM)
             query_subject = """
             MATCH (c:Claim {id: $claim_id})
@@ -715,28 +812,34 @@ class GraphService:
             result = session.run(
                 query_subject,
                 claim_id=claim_id,
-                entity_name=subject_entity_name,
+                entity_name=matched_subject,
             )
 
-            if not result.single():
-                logger.warning(f"Failed to link subject entity {subject_entity_name} to claim")
+            records = list(result)
+            if not records:
+                logger.warning(f"Failed to create MAKES_CLAIM relationship for {matched_subject}")
                 return False
 
             # Link claim to object entity (ABOUT) if object exists and is not NONE
             if object_entity_name and object_entity_name.upper() != "NONE":
-                query_object = """
-                MATCH (c:Claim {id: $claim_id})
-                MATCH (e:Entity {name: $entity_name})
-                MERGE (c)-[r:ABOUT]->(e)
-                ON CREATE SET r.created_at = datetime()
-                RETURN r
-                """
+                matched_object = find_entity_fuzzy(object_entity_name)
 
-                session.run(
-                    query_object,
-                    claim_id=claim_id,
-                    entity_name=object_entity_name,
-                )
+                if matched_object:
+                    query_object = """
+                    MATCH (c:Claim {id: $claim_id})
+                    MATCH (e:Entity {name: $entity_name})
+                    MERGE (c)-[r:ABOUT]->(e)
+                    ON CREATE SET r.created_at = datetime()
+                    RETURN r
+                    """
+
+                    session.run(
+                        query_object,
+                        claim_id=claim_id,
+                        entity_name=matched_object,
+                    )
+                else:
+                    logger.debug(f"Object entity {object_entity_name} not found (optional)")
 
             return True
 

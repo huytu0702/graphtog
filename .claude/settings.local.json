@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:microsoft.github.io)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(docker exec:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:arxiv.org)"
     ],
     "deny": [],
     "ask": []

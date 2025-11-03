@@ -60,7 +60,7 @@ class CommunitySummarizationService:
                 description: rel.description
             }) AS entity_rels
 
-            RETURN
+            WITH
                 c.id AS community_id,
                 c.level AS community_level,
                 collect(DISTINCT {
@@ -72,6 +72,14 @@ class CommunitySummarizationService:
                 })[0..$max_members] AS members,
                 entity_rels[0..30] AS relationships,
                 count(DISTINCT e) AS member_count
+
+            RETURN
+                community_id,
+                community_level,
+                members,
+                relationships,
+                member_count
+            LIMIT 1
             """
 
             result = session.run(
@@ -147,17 +155,96 @@ class CommunitySummarizationService:
             response = model.generate_content(prompt)
 
             try:
+                import re
+
                 result_text = response.text.strip()
 
-                if result_text.startswith("```"):
-                    result_text = result_text.split("```")[1]
+                # Remove markdown code blocks using proper regex
+                if "```" in result_text:
+                    # Extract content between code blocks
+                    code_block_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+                    matches = re.findall(code_block_pattern, result_text, re.DOTALL)
+                    if matches:
+                        result_text = matches[0].strip()
+                    else:
+                        # Fallback: remove all ``` markers
+                        result_text = re.sub(r'```[a-z]*\n?', '', result_text).strip()
+                        result_text = result_text.replace('```', '').strip()
 
-                    if result_text.startswith("json"):
-                        result_text = result_text[4:]
+                # ENHANCED: Fix common JSON formatting issues
+                # Replace smart quotes with regular quotes (before control char handling)
+                result_text = result_text.replace('"', '"').replace('"', '"')
+                result_text = result_text.replace(''', "'").replace(''', "'")
 
-                    result_text = result_text.strip()
+                # ENHANCED: Handle literal control characters within JSON strings
+                # The issue is: LLM may output actual newline/tab characters within JSON string values
+                # These are invalid in JSON and must be escaped
+                # Strategy: Replace literal control chars with their escaped equivalents
 
-                summary_data = json.loads(result_text)
+                # First, we need to handle this carefully to not break JSON structure
+                # We'll process string by string using a regex approach
+
+                def fix_json_control_chars(json_text):
+                    """Fix literal control characters in JSON by escaping them properly"""
+                    import re
+
+                    # Find all string values in JSON (content between quotes)
+                    def string_replacer(match):
+                        full_match = match.group(0)
+                        quote = full_match[0]  # First character is the opening quote
+                        content = match.group(1)  # String content (between quotes)
+
+                        # Escape literal control characters within the string content
+                        content = content.replace('\n', '\\n')
+                        content = content.replace('\r', '\\r')
+                        content = content.replace('\t', '\\t')
+
+                        # Remove any other control characters (0x00-0x1F except \t\n\r which we just handled)
+                        content = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', content)
+
+                        # Remove extended ASCII control chars
+                        content = re.sub(r'[\x7F-\x9F]', '', content)
+
+                        return f'{quote}{content}{quote}'
+
+                    # Match JSON string values with double quotes: "..."
+                    # Pattern matches: " followed by content (non-greedy, handles escapes), then closing "
+                    pattern = r'"((?:[^"\\]|\\.)*)"'
+                    result = re.sub(pattern, string_replacer, json_text, flags=re.DOTALL)
+
+                    return result
+
+                result_text = fix_json_control_chars(result_text)
+
+                # Remove any leading/trailing whitespace after cleaning
+                result_text = result_text.strip()
+
+                # Verify we still have content
+                if not result_text:
+                    logger.warning("Empty response after cleaning code blocks and control characters")
+                    return {
+                        "status": "success",
+                        "community_id": community_id,
+                        "summary": "No summary generated",
+                        "themes": [],
+                        "significance": "medium",
+                    }
+
+                # ENHANCED: Try parsing with retry logic
+                max_retries = 2
+                for attempt in range(max_retries):
+                    try:
+                        summary_data = json.loads(result_text)
+                        break
+                    except json.JSONDecodeError as parse_error:
+                        if attempt < max_retries - 1:
+                            # Try additional cleaning on retry
+                            logger.debug(f"JSON parse attempt {attempt + 1} failed, trying additional cleaning")
+                            # Remove any trailing commas before closing braces/brackets
+                            result_text = re.sub(r',\s*}', '}', result_text)
+                            result_text = re.sub(r',\s*]', ']', result_text)
+                        else:
+                            raise parse_error
 
                 return {
                     "status": "success",
@@ -168,13 +255,14 @@ class CommunitySummarizationService:
                 }
 
             except json.JSONDecodeError as e:
-                logger.warning(f"Could not parse summary JSON: {e}")
+                logger.warning(f"Could not parse summary JSON after all attempts: {e}")
+                logger.debug(f"Problematic JSON text (first 500 chars): {result_text[:500]}")
 
                 # Fallback to raw text
                 return {
                     "status": "success",
                     "community_id": community_id,
-                    "summary": response.text.strip()[:200],
+                    "summary": response.text.strip()[:500],  # Increased from 200 to 500
                     "themes": [],
                     "significance": "medium",
                 }

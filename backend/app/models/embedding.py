@@ -30,7 +30,7 @@ class TextEmbedding(Base):
     text = Column(Text, nullable=False)
     start_char = Column(Integer, nullable=True)
     end_char = Column(Integer, nullable=True)
-    embedding = Column(Vector(2048), nullable=False)
+    embedding = Column(Vector(3072), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationships
@@ -38,4 +38,3 @@ class TextEmbedding(Base):
 
     def __repr__(self) -> str:
         return f"<TextEmbedding(chunk_id={self.chunk_id}, document_id={self.document_id})>"
-

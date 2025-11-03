@@ -252,6 +252,7 @@ def build_claims_extraction_prompt(
         completion_delimiter=completion_delimiter,
     )
 
+
 COMMUNITY_REPORT_PROMPT_TEMPLATE = """
 You are an AI assistant that helps a human analyst to perform general information discovery. Information discovery is the process of identifying and assessing relevant information associated with certain entities (e.g., organizations and individuals) within a network.
 
@@ -356,49 +357,6 @@ Use the following text for your answer. Do not make anything up in your answer.
 
 Text:
 {input_text}
-
-The report should include the following sections:
-
-- TITLE: community's name that represents its key entities - title should be short but specific. When possible, include representative named entities in the title.
-- SUMMARY: An executive summary of the community's overall structure, how its entities are related to each other, and significant information associated with its entities.
-- IMPACT SEVERITY RATING: a float score between 0-10 that represents the severity of IMPACT posed by entities within the community.  IMPACT is the scored importance of a community.
-- RATING EXPLANATION: Give a single sentence explanation of the IMPACT severity rating.
-- DETAILED FINDINGS: A list of 5-10 key insights about the community. Each insight should have a short summary followed by multiple paragraphs of explanatory text grounded according to the grounding rules below. Be comprehensive.
-
-Return output as a well-formed JSON-formatted string with the following format:
-    {{
-        "title": <report_title>,
-        "summary": <executive_summary>,
-        "rating": <impact_severity_rating>,
-        "rating_explanation": <rating_explanation>,
-        "findings": [
-            {{
-                "summary":<insight_1_summary>,
-                "explanation": <insight_1_explanation>
-            }},
-            {{
-                "summary":<insight_2_summary>,
-                "explanation": <insight_2_explanation>
-            }}
-        ]
-    }}
-
-# Grounding Rules
-
-Points supported by data should list their data references as follows:
-
-"This is an example sentence supported by multiple data references [Data: <dataset name> (record ids); <dataset name> (record ids)]."
-
-Do not list more than 5 record ids in a single reference. Instead, list the top 5 most relevant record ids and add "+more" to indicate that there are more.
-
-For example:
-"Person X is the owner of Company Y and subject to many allegations of wrongdoing [Data: Reports (1), Entities (5, 7); Relationships (23); Claims (7, 2, 34, 64, 46, +more)]."
-
-where 1, 5, 7, 23, 2, 34, 46, and 64 represent the id (not the index) of the relevant data record.
-
-Do not include information where the supporting evidence for it is not provided.
-
-Limit the total report length to {max_report_length} words.
 
 Output:"""
 
@@ -553,13 +511,40 @@ def _format_entity_types(entity_types: Optional[Sequence[str]]) -> str:
 
 
 def _append_relationship_focus(prompt: str, entity_names: Optional[Iterable[str]]) -> str:
-    """Add an additional hint to focus on provided entity names when extracting relationships."""
+    """
+    Modify the prompt to ONLY extract relationships (not entities) for the provided entity names.
+    This is used when we already have entities and only need relationships between them.
+    """
     if not entity_names:
         return prompt
     names = ", ".join(sorted({name.strip() for name in entity_names if name.strip()}))
     if not names:
         return prompt
-    return f"{prompt}\nFocus on relationships that involve the following entities when applicable: {names}."
+
+    # Extract tuple_delimiter from the original prompt (it's in the format instructions)
+    # Default to ||| if not found
+    tuple_delim = "|||"
+    if "{tuple_delimiter}" in prompt or "|||" in prompt:
+        tuple_delim = "|||"
+
+    # Add strong instruction to ONLY return relationships
+    relationship_only_instruction = f"""
+
+IMPORTANT MODIFICATION:
+You have already identified the following entities in a previous step:
+{names}
+
+NOW, your task is to ONLY extract relationships between these entities. DO NOT output entity records again.
+
+For each pair of related entities from the list above, output ONLY relationship records in this format:
+("relationship"{tuple_delim}<source_entity>{tuple_delim}<target_entity>{tuple_delim}<relationship_description>{tuple_delim}<relationship_strength>)
+
+Skip step 1 (entity identification) completely. Focus ONLY on step 2 (relationship identification) using the entities listed above.
+
+Return ONLY relationship tuples. Do not include any entity tuples in your response.
+"""
+
+    return prompt + relationship_only_instruction
 
 
 # ---------------------------------------------------------------------------
@@ -889,139 +874,3 @@ def build_relationship_extraction_prompt(
         completion_delimiter=completion_delimiter,
     )
     return _append_relationship_focus(prompt, entity_names)
-
-
-def build_query_classification_prompt(query: str) -> str:
-    """Create prompt for classifying query type."""
-    return f"""Classify this query type. Return JSON with:
-- type: One of FACTUAL, ANALYTICAL, EXPLORATORY, COMPARISON
-- reasoning: Brief explanation
-- key_entities: List of likely key entities to search for
-- suggested_depth: Number from 1-3 (1=local/simple, 2=community, 3=global/complex)
-
-QUERY: {query}
-
-JSON:"""
-
-
-def build_contextual_answer_prompt(query: str, context: str, citations: Optional[List[str]] = None) -> str:
-    """Create prompt for contextual answer generation."""
-    citations_text = (
-        "\n\nCitations:\n" + "\n".join([f"- {citation}" for citation in citations]) if citations else ""
-    )
-    return f"""Answer the following question based on the provided context.
-Be concise and accurate. If the context doesn't contain enough information, say so.
-
-QUESTION: {query}
-
-CONTEXT:
-{context}{citations_text}
-
-ANSWER:"""
-
-
-# ---------------------------------------------------------------------------
-# Map-Reduce prompts for Global Search (Microsoft GraphRAG optimization)
-# ---------------------------------------------------------------------------
-
-MAP_REDUCE_BATCH_SUMMARY_PROMPT = """
-You are an AI assistant that helps analyze communities of entities in a knowledge graph.
-
-# Goal
-Given a user query and information about multiple communities, summarize the key relevant information from these communities that could help answer the query.
-
-# Instructions
-1. Review each community's information (summary, themes, entities)
-2. Extract information specifically relevant to the user's query
-3. Synthesize a concise summary focusing on facts that address the query
-4. Include community IDs as references for traceability
-
-# Community Information
-{communities_info}
-
-# User Query
-{query}
-
-# Output Format
-Return a JSON object with:
-{{
-    "relevant_communities": [list of community IDs that are relevant],
-    "summary": "A synthesized summary of relevant information from these communities",
-    "key_points": ["Point 1", "Point 2", "Point 3"],
-    "confidence": "high|medium|low"
-}}
-
-Return ONLY valid JSON, no additional text or markdown code blocks.
-"""
-
-MAP_REDUCE_FINAL_SYNTHESIS_PROMPT = """
-You are an AI assistant that generates comprehensive answers by synthesizing information from multiple sources.
-
-# Goal
-Given a user query and intermediate summaries from different parts of the knowledge graph, generate a final comprehensive answer.
-
-# Instructions
-1. Review all intermediate summaries
-2. Identify common themes and patterns
-3. Resolve any contradictions
-4. Synthesize a coherent, comprehensive answer
-5. Include specific references to communities when making claims
-
-# User Query
-{query}
-
-# Intermediate Summaries
-{intermediate_summaries}
-
-# Output Format
-Return a JSON object with:
-{{
-    "answer": "A comprehensive answer synthesizing all information",
-    "key_insights": ["Insight 1", "Insight 2", "Insight 3"],
-    "supporting_communities": ["Community IDs that support the answer"],
-    "confidence_score": "0.0 to 1.0",
-    "limitations": "Any limitations or gaps in the available information"
-}}
-
-Return ONLY valid JSON, no additional text or markdown code blocks.
-"""
-
-
-def build_map_reduce_batch_summary_prompt(
-    query: str,
-    communities_info: str,
-) -> str:
-    """
-    Create prompt for Map phase: summarizing a batch of communities
-
-    Args:
-        query: User's question
-        communities_info: Formatted information about communities in this batch
-
-    Returns:
-        Prompt string for batch summarization
-    """
-    return MAP_REDUCE_BATCH_SUMMARY_PROMPT.format(
-        query=query,
-        communities_info=communities_info,
-    )
-
-
-def build_map_reduce_final_synthesis_prompt(
-    query: str,
-    intermediate_summaries: str,
-) -> str:
-    """
-    Create prompt for Reduce phase: synthesizing intermediate summaries into final answer
-
-    Args:
-        query: User's question
-        intermediate_summaries: Formatted intermediate summaries from Map phase
-
-    Returns:
-        Prompt string for final synthesis
-    """
-    return MAP_REDUCE_FINAL_SYNTHESIS_PROMPT.format(
-        query=query,
-        intermediate_summaries=intermediate_summaries,
-    )

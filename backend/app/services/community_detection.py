@@ -99,7 +99,7 @@ class CommunityDetectionService:
 
             # Ensure graph projection exists
             list_result = session.run(
-                "CALL gds.graph.list() YIELD graphName WHERE graphName = 'entity_graph' RETURN graphName"
+                "CALL gds.graph.list() YIELD graphName WHERE graphName = 'entity_graph' RETURN graphName LIMIT 1"
             ).single()
 
             if not list_result:

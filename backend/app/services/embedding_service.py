@@ -29,7 +29,7 @@ class EmbeddingService:
     """Service for generating Gemini embeddings and persisting them with pgvector"""
 
     def __init__(self) -> None:
-        self.model_name = "models/embedding-001"  # Gemini gemini-embedding-001 (2048 dimensions)
+        self.model_name = "gemini-embedding-001"  # Gemini gemini-embedding-001 (2048 dimensions)
         self.max_retries = 3
         self.retry_delay_seconds = 1.0
         self.rate_limit_delay = 0.05
@@ -68,10 +68,8 @@ class EmbeddingService:
                 embedding = response.get("embedding")
                 if not embedding:
                     raise RuntimeError("Embedding response missing vector")
-                if len(embedding) != 2048:
-                    logger.warning(
-                        "Unexpected embedding length %s (expected 2048)", len(embedding)
-                    )
+                if len(embedding) != 3072:
+                    logger.warning("Unexpected embedding length %s (expected 3072)", len(embedding))
                 return list(embedding)
             except Exception as exc:  # pragma: no cover - external service errors
                 wait_time = self.retry_delay_seconds * (2**attempt)
@@ -169,4 +167,3 @@ class EmbeddingService:
 
 # Export singleton instance
 embedding_service = EmbeddingService()
-

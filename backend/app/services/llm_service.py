@@ -43,7 +43,7 @@ class LLMService:
 
     def __init__(self):
         """Initialize LLM service"""
-        self.model_name = "gemini-2.5-flash-lite"
+        self.model_name = "gemini-2.5-flash"
         self.rate_limit_delay = 1.0 / 60  # 60 requests per minute
         self.last_request_time = 0
         self.max_retries = 3
@@ -80,16 +80,32 @@ class LLMService:
     def _parse_json_response(response: str) -> Dict[str, Any]:
         """
         Parse JSON response from LLM
-        Handles markdown code blocks and invalid JSON
+        Handles markdown code blocks, control characters, and invalid JSON
         """
+        import re
+
+        # Check for empty or None response
+        if not response:
+            logger.warning("Empty response received from LLM")
+            return {}
+
+        # Clean the response first
+        cleaned_response = response.strip()
+
+        # Check again after stripping
+        if not cleaned_response:
+            logger.warning("Response is empty after stripping whitespace")
+            return {}
+
         # Try direct parse first
         try:
-            return json.loads(response)
+            return json.loads(cleaned_response)
         except json.JSONDecodeError:
             pass
+
         # Try removing markdown code blocks
-        if response.startswith("```"):
-            lines = response.split("\n")
+        if cleaned_response.startswith("```"):
+            lines = cleaned_response.split("\n")
             json_lines = []
             in_block = False
             for line in lines:
@@ -99,14 +115,42 @@ class LLMService:
                     json_lines.append(line)
             if json_lines:
                 try:
-                    return json.loads("\n".join(json_lines))
-                except json.JSONDecodeError:
+                    cleaned_response = "\n".join(json_lines).strip()
+                except Exception:
                     pass
-        logger.error(f"Failed to parse response as JSON: {response[:200]}")
+
+        # Check if still empty after code block removal
+        if not cleaned_response:
+            logger.warning("Response is empty after removing code blocks")
+            return {}
+
+        # Remove invalid control characters (keep newlines, tabs, carriage returns)
+        # JSON spec allows: \t \n \r and escaped control chars like \u0000
+        # Remove other control chars (0x00-0x1F except \t\n\r)
+        cleaned_response = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", cleaned_response)
+
+        # Final check
+        if not cleaned_response:
+            logger.warning("Response is empty after control character removal")
+            return {}
+
+        # Try parsing the cleaned response
+        try:
+            return json.loads(cleaned_response)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse response as JSON after cleaning: {str(e)[:100]}")
+            logger.debug(f"Response preview (first 500 chars): {cleaned_response[:500]}")
+            logger.debug(f"Response length after cleaning: {len(cleaned_response)} characters")
+            # Also log the raw response for debugging
+            if response:
+                logger.debug(f"Original response preview (first 200 chars): {response[:200]}")
+
         return {}
 
     @staticmethod
-    def _parse_graph_extraction_response(response: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def _parse_graph_extraction_response(
+        response: str,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Parse GraphRAG tuple-based extraction output into structured entities and relationships.
 
@@ -174,7 +218,10 @@ class LLMService:
             normalized = record
             if normalized.startswith("(") and normalized.endswith(")"):
                 normalized = normalized[1:-1]
-            parts = [part.strip().strip('"').strip("'") for part in normalized.split(DEFAULT_TUPLE_DELIMITER)]
+            parts = [
+                part.strip().strip('"').strip("'")
+                for part in normalized.split(DEFAULT_TUPLE_DELIMITER)
+            ]
             if len(parts) < 4:
                 continue
 
@@ -274,27 +321,64 @@ class LLMService:
         def call_llm():
             model = genai.GenerativeModel(self.model_name)
             response = model.generate_content(prompt)
-            return response.text
+            # Ensure response text is not None or empty
+            text = response.text if response.text else ""
+            return text
 
         response_text = self._retry_with_backoff(call_llm)
-        _, relationships = self._parse_graph_extraction_response(response_text)
+
+        # Check for empty response
+        if not response_text or not response_text.strip():
+            logger.warning(
+                f"Empty response from LLM for relationship extraction (chunk {chunk_id})"
+            )
+            return {
+                "chunk_id": chunk_id,
+                "relationships": [],
+                "status": "success",
+            }
+
+        # Parse graph extraction response - this extracts both entities and relationships
+        extracted_entities, relationships = self._parse_graph_extraction_response(response_text)
+
+        # Log if we got entity records instead of relationships
+        if extracted_entities and not relationships:
+            logger.warning(
+                f"LLM returned {len(extracted_entities)} entity records but no relationships for chunk {chunk_id}. This may indicate the LLM didn't follow the relationship extraction format."
+            )
 
         try:
             if entity_names:
-                entity_name_set = {name.strip() for name in entity_names if name and isinstance(name, str)}
+                entity_name_set = {
+                    name.strip().upper() for name in entity_names if name and isinstance(name, str)
+                }
                 if entity_name_set:
+                    # Filter relationships to only include those between known entities
+                    # Use case-insensitive matching for better accuracy
                     relationships = [
                         rel
                         for rel in relationships
-                        if rel.get("source") in entity_name_set and rel.get("target") in entity_name_set
+                        if rel.get("source", "").strip().upper() in entity_name_set
+                        and rel.get("target", "").strip().upper() in entity_name_set
                     ]
 
+            # Fallback: Try JSON parsing if tuple parsing failed
             if not relationships:
                 parsed = self._parse_json_response(response_text)
                 if isinstance(parsed, dict):
                     relationships = parsed.get("relationships", [])
                 elif isinstance(parsed, list):
                     relationships = parsed
+
+            # Final validation: ensure relationships have required fields
+            validated_relationships = []
+            for rel in relationships:
+                if isinstance(rel, dict) and rel.get("source") and rel.get("target"):
+                    validated_relationships.append(rel)
+                else:
+                    logger.debug(f"Skipping invalid relationship record: {rel}")
+
+            relationships = validated_relationships
 
             return {
                 "chunk_id": chunk_id,
@@ -369,12 +453,22 @@ class LLMService:
             # Use entity names as entity specs if not provided
             if not entity_specs and entities:
                 entity_names = [e.get("name", "") for e in entities if e.get("name")]
-                entity_specs = ", ".join(entity_names) if entity_names else "organization, person, event"
+                entity_specs = (
+                    ", ".join(entity_names) if entity_names else "organization, person, event"
+                )
+
+            # Use consistent delimiters matching the prompt template defaults
+            tuple_delimiter = "<|>"
+            record_delimiter = "##"
+            completion_delimiter = "<|COMPLETE|>"
 
             prompt = build_claims_extraction_prompt(
                 input_text=text,
                 entity_specs=entity_specs,
                 claim_description=claim_description,
+                tuple_delimiter=tuple_delimiter,
+                record_delimiter=record_delimiter,
+                completion_delimiter=completion_delimiter,
             )
 
             self._apply_rate_limit()
@@ -386,8 +480,13 @@ class LLMService:
 
             response_text = self._retry_with_backoff(call_llm)
 
-            # Parse claims from GraphRAG tuple format
-            claims = self._parse_claims_response(response_text)
+            # Parse claims from GraphRAG tuple format using matching delimiters
+            claims = self._parse_claims_response(
+                response_text,
+                tuple_delimiter=tuple_delimiter,
+                record_delimiter=record_delimiter,
+                completion_delimiter=completion_delimiter,
+            )
 
             return {
                 "chunk_id": chunk_id,
@@ -404,7 +503,13 @@ class LLMService:
                 "error": str(e),
             }
 
-    def _parse_claims_response(self, response: str) -> List[Dict[str, Any]]:
+    def _parse_claims_response(
+        self,
+        response: str,
+        tuple_delimiter: str = "<|>",
+        record_delimiter: str = "##",
+        completion_delimiter: str = "<|COMPLETE|>",
+    ) -> List[Dict[str, Any]]:
         """
         Parse claims from GraphRAG tuple-based format
 
@@ -414,6 +519,9 @@ class LLMService:
 
         Args:
             response: LLM response text with claims in tuple format
+            tuple_delimiter: Delimiter between tuple fields (default: "<|>")
+            record_delimiter: Delimiter between records (default: "##")
+            completion_delimiter: Completion marker (default: "<|COMPLETE|>")
 
         Returns:
             List of claim dictionaries
@@ -422,23 +530,47 @@ class LLMService:
 
         try:
             # Remove completion delimiter if present
-            response = response.replace(DEFAULT_COMPLETION_DELIMITER, "")
+            response = response.replace(completion_delimiter, "")
+
+            # Remove markdown code blocks if present
+            if "```" in response:
+                import re
+
+                response = re.sub(r"```[a-z]*\n", "", response)
+                response = response.replace("```", "")
+
             response = response.strip()
 
             # Split by record delimiter
-            claim_records = response.split(DEFAULT_RECORD_DELIMITER)
+            claim_records = response.split(record_delimiter)
 
             for record in claim_records:
                 record = record.strip()
                 if not record:
                     continue
 
+                # Skip markdown-style headers or non-tuple lines
+                # These don't follow the tuple format (SUBJECT<|>OBJECT...)
+                if not "(" in record or tuple_delimiter not in record:
+                    # Log only if it's not a markdown header or empty line
+                    if (
+                        record
+                        and not record.startswith("#")
+                        and not record.startswith("-")
+                        and len(record) > 5
+                    ):
+                        logger.debug(f"Skipping non-tuple claim record: {record[:100]}")
+                    continue
+
                 # Remove parentheses
                 if record.startswith("(") and record.endswith(")"):
                     record = record[1:-1]
+                elif record.startswith("("):
+                    # Handle case where closing paren is missing
+                    record = record[1:]
 
                 # Split by tuple delimiter
-                parts = record.split(DEFAULT_TUPLE_DELIMITER)
+                parts = record.split(tuple_delimiter)
 
                 if len(parts) >= 8:  # Ensure we have all required fields
                     claim = {
@@ -452,8 +584,11 @@ class LLMService:
                         "source_text": parts[7].strip() if len(parts) > 7 else "",
                     }
                     claims.append(claim)
-                else:
-                    logger.warning(f"Malformed claim record (expected 8 fields, got {len(parts)}): {record[:100]}")
+                elif len(parts) > 1:
+                    # Log warning only for records that look like they should be claims but are malformed
+                    logger.warning(
+                        f"Malformed claim record (expected 8 fields, got {len(parts)}): {record[:100]}"
+                    )
 
         except Exception as e:
             logger.error(f"Claims parsing error: {e}")
@@ -643,9 +778,9 @@ class LLMService:
             communities_parts = []
             for comm in communities:
                 comm_text = f"**Community {comm['community_id']}** (Level {comm.get('level', 0)}, {comm['size']} entities)"
-                if comm.get('summary'):
+                if comm.get("summary"):
                     comm_text += f"\n  Summary: {comm['summary']}"
-                if comm.get('themes'):
+                if comm.get("themes"):
                     comm_text += f"\n  Themes: {comm['themes']}"
                 communities_parts.append(comm_text)
 
@@ -709,9 +844,11 @@ class LLMService:
                 if summary.get("status") == "success":
                     text = f"**Batch {i}** (Confidence: {summary.get('confidence', 'medium')})"
                     text += f"\n{summary.get('batch_summary', '')}"
-                    if summary.get('key_points'):
-                        text += "\nKey Points:\n" + "\n".join([f"- {p}" for p in summary['key_points']])
-                    if summary.get('relevant_communities'):
+                    if summary.get("key_points"):
+                        text += "\nKey Points:\n" + "\n".join(
+                            [f"- {p}" for p in summary["key_points"]]
+                        )
+                    if summary.get("relevant_communities"):
                         text += f"\nRelevant Communities: {', '.join(map(str, summary['relevant_communities']))}"
                     summaries_parts.append(text)
 

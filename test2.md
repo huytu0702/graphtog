@@ -1,32 +1,3 @@
-# NGHỊ ĐỊNH VỀ PHÁT TRIỂN ĐÔ THỊ THÔNG MINH
-
-**CHÍNH PHỦ**  
-**CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM**  
-**Độc lập - Tự do - Hạnh phúc**
-
-Số: 269/2025/NĐ-CP  
-Hà Nội, ngày 14 tháng 10 năm 2025
-
----
-
-## NGHỊ ĐỊNH VỀ PHÁT TRIỂN ĐÔ THỊ THÔNG MINH
-
-**Căn cứ pháp lý:**
-- Căn cứ Luật Tổ chức Chính phủ số 63/2025/QH15
-- Căn cứ Luật Tổ chức chính quyền địa phương số 72/2025/QH15
-- Căn cứ Luật Quy hoạch đô thị và nông thôn số 47/2024/QH15
-- Căn cứ Luật Xây dựng số 50/2014/QH13; Luật sửa đổi, bổ sung một số điều của Luật Xây dựng số 62/2020/QH14
-- Căn cứ Luật An ninh mạng số 24/2018/QH14
-- Căn cứ Luật Công nghiệp công nghệ số 71/2025/QH15
-- Căn cứ Luật Đường bộ số 35/2024/QH15
-- Căn cứ Nghị quyết số 193/2025/QH15 của Quốc hội về thí điểm một số cơ chế, chính sách đặc biệt tạo đột phá phát triển khoa học, công nghệ, đổi mới sáng tạo và chuyển đổi số quốc gia
-
-Theo đề nghị của Bộ trưởng Bộ Xây dựng;
-
-Chính phủ ban hành Nghị định về phát triển đô thị thông minh.
-
----
-
 ## CHƯƠNG I - QUY ĐỊNH CHUNG
 
 ### Điều 1. Phạm vi điều chỉnh và đối tượng áp dụng
