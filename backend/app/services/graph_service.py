@@ -56,12 +56,19 @@ class GraphService:
 
             # Create indexes for performance
             indexes = [
-                "CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)",
-                "CREATE INDEX textunit_doc_id IF NOT EXISTS FOR (t:TextUnit) ON (t.document_id)",
-                "CREATE INDEX entity_confidence IF NOT EXISTS FOR (e:Entity) ON (e.confidence)",
-                "CREATE INDEX relationship_type IF NOT EXISTS FOR (r:MENTIONED_IN) ON (r.type)",
-                "CREATE INDEX claim_type IF NOT EXISTS FOR (c:Claim) ON (c.claim_type)",
-                "CREATE INDEX claim_status IF NOT EXISTS FOR (c:Claim) ON (c.status)",
+            "CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)",
+            "CREATE INDEX textunit_doc_id IF NOT EXISTS FOR (t:TextUnit) ON (t.document_id)",
+            "CREATE INDEX entity_confidence IF NOT EXISTS FOR (e:Entity) ON (e.confidence)",
+            "CREATE INDEX relationship_type IF NOT EXISTS FOR (r:MENTIONED_IN) ON (r.type)",
+            "CREATE INDEX claim_type IF NOT EXISTS FOR (c:Claim) ON (c.claim_type)",
+            "CREATE INDEX claim_status IF NOT EXISTS FOR (c:Claim) ON (c.status)",
+                # ToG-specific indexes for optimized traversal
+                "CREATE INDEX entity_name_lookup IF NOT EXISTS FOR (e:Entity) ON (e.name)",
+                "CREATE INDEX entity_document IF NOT EXISTS FOR (e:Entity) ON (e.document_id)",
+                "CREATE INDEX entity_mention_count IF NOT EXISTS FOR (e:Entity) ON (e.mention_count)",
+                "CREATE INDEX relation_type IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.type)",
+                "CREATE INDEX relation_confidence IF NOT EXISTS FOR ()-[r:RELATES_TO]-() ON (r.confidence)",
+                "CREATE INDEX entity_name_doc_composite IF NOT EXISTS FOR (e:Entity) ON (e.name, e.document_id)",
             ]
 
             for index in indexes:

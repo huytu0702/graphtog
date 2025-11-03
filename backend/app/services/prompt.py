@@ -874,3 +874,268 @@ def build_relationship_extraction_prompt(
         completion_delimiter=completion_delimiter,
     )
     return _append_relationship_focus(prompt, entity_names)
+
+
+# ---------------------------------------------------------------------------#
+# Tree of Graphs (ToG) reasoning prompts
+# ---------------------------------------------------------------------------#
+
+TOG_TOPIC_ENTITY_EXTRACTION_PROMPT = """
+Given a question and a list of available entities from a knowledge graph, identify which entities are mentioned or relevant to answering the question.
+
+Question: {question}
+
+Available Entities: {available_entities}
+
+Return a JSON object with the following format:
+{{
+    "topic_entities": ["Entity1", "Entity2", "Entity3"]
+}}
+
+Instructions:
+- Extract entities that are directly mentioned in the question
+- Include entities that are likely needed to answer the question
+- Return at most 5 entities
+- If no relevant entities are found, return an empty array
+- Only return valid JSON, no additional text
+"""
+
+TOG_RELATION_EXTRACTION_PROMPT = """
+Given a question, current entities being explored, and available relation types, select the most relevant relations to explore next.
+
+Question: {question}
+Current Entities: {entities}
+Available Relations: {relations}
+Previously Explored Relations: {previous_relations}
+
+Return a JSON object with the following format:
+{{
+    "relations": [
+        {{
+            "relation_type": "relation_name",
+            "score": 0.8,
+            "reasoning": "Why this relation is relevant to the question"
+        }},
+        {{
+            "relation_type": "another_relation",
+            "score": 0.6,
+            "reasoning": "Why this relation is also relevant"
+        }}
+    ]
+}}
+
+Instructions:
+- Score relations from 0.0 to 1.0 based on relevance to the question
+- Higher scores indicate more promising relations to explore
+- Avoid relations that have already been explored
+- Select at most 3 relations
+- Only return valid JSON, no additional text
+"""
+
+TOG_ENTITY_SCORING_PROMPT = """
+Given a question, a relation type, a source entity, and candidate target entities, score each candidate entity based on how well it helps answer the question through this relation.
+
+Question: {question}
+Relation Type: {relation_type}
+Source Entity: {source_entity}
+Candidate Entities: {candidate_entities}
+
+Return a JSON object with the following format:
+{{
+    "entity_scores": [
+        {{
+            "entity_name": "Entity1",
+            "score": 0.9,
+            "reasoning": "Why this entity is highly relevant"
+        }},
+        {{
+            "entity_name": "Entity2",
+            "score": 0.4,
+            "reasoning": "Why this entity is less relevant"
+        }}
+    ]
+}}
+
+Instructions:
+- Score each candidate entity from 0.0 to 1.0
+- Higher scores indicate entities that better help answer the question
+- Consider the semantic fit between the source entity, relation, and candidate
+- Only return valid JSON, no additional text
+"""
+
+TOG_SUFFICIENCY_CHECK_PROMPT = """
+Given a question and the relations that have been explored so far, determine if there is sufficient information to answer the question.
+
+Question: {question}
+Explored Relations: {relations}
+
+Return a JSON object with the following format:
+{{
+    "sufficient": true,
+    "confidence_score": 0.85,
+    "reasoning": "Explanation of why the information is or isn't sufficient"
+}}
+
+Instructions:
+- Set "sufficient" to true if the explored relations provide enough information to answer the question
+- Set "sufficient" to false if more exploration is needed
+- Provide a confidence score from 0.0 to 1.0
+- Give clear reasoning for your decision
+- Only return valid JSON, no additional text
+"""
+
+TOG_FINAL_ANSWER_PROMPT = """
+Given a question and the reasoning path that was explored through the knowledge graph, generate a final answer.
+
+Question: {question}
+Reasoning Path: {reasoning_path}
+
+Return a JSON object with the following format:
+{{
+    "answer": "Your comprehensive answer here",
+    "confidence": 0.8,
+    "reasoning_summary": "Brief summary of how the answer was derived"
+}}
+
+Instructions:
+- Provide a clear, comprehensive answer to the question
+- Base your answer on the reasoning path provided
+- Include confidence score from 0.0 to 1.0
+- If the reasoning path doesn't provide enough information, say so clearly
+- Only return valid JSON, no additional text
+"""
+
+
+# ---------------------------------------------------------------------------#
+# Query processing and answer generation prompts
+# ---------------------------------------------------------------------------#
+
+def build_query_classification_prompt(query: str) -> str:
+    """
+    Build prompt for classifying query type (local, global, hybrid, ToG).
+
+    Args:
+        query: User's question
+
+    Returns:
+        Formatted prompt for query classification
+    """
+    return f"""
+Classify the following query to determine the best retrieval strategy.
+
+Query: {query}
+
+Classify this query as one of:
+- "local": Question about specific entities, people, or events (narrow scope)
+- "global": Question requiring broad understanding across the entire dataset (wide scope)
+- "hybrid": Question that needs both specific details and broad context
+- "tog": Complex multi-hop question requiring reasoning through relationships
+
+Return ONLY a JSON object in this exact format:
+{{
+    "query_type": "local|global|hybrid|tog",
+    "reasoning": "Brief explanation of why this classification was chosen",
+    "confidence": 0.85
+}}
+
+Examples:
+- "What did John say about the project?" -> local
+- "What are the main themes across all documents?" -> global
+- "How does John's opinion relate to the overall company strategy?" -> hybrid
+- "What connects Person A to Event B through Organization C?" -> tog
+"""
+
+
+def build_contextual_answer_prompt(query: str, context: str, citations: bool = True) -> str:
+    """
+    Build prompt for generating contextual answer from retrieved information.
+
+    Args:
+        query: User's question
+        context: Retrieved context information
+        citations: Whether to include citation markers
+
+    Returns:
+        Formatted prompt for answer generation
+    """
+    citation_instruction = """
+Include citation markers [1], [2], etc. to reference specific sources in your answer.
+""" if citations else ""
+
+    return f"""
+Answer the following question based on the provided context.
+
+Question: {query}
+
+Context:
+{context}
+
+{citation_instruction}
+
+Instructions:
+- Provide a clear, comprehensive answer based strictly on the context provided
+- Do not make up or infer information not present in the context
+- If the context doesn't contain enough information to answer fully, say so
+- Be concise but complete
+- Use a professional, informative tone
+
+Answer:"""
+
+
+def build_map_reduce_batch_summary_prompt(query: str, communities_info: str) -> str:
+    """
+    Build prompt for summarizing batch of community reports (map phase).
+
+    Args:
+        query: User's question
+        communities_info: Information about community reports to summarize
+
+    Returns:
+        Formatted prompt for batch summarization
+    """
+    return f"""
+Summarize the following community information to help answer the user's question.
+
+Question: {query}
+
+Community Information:
+{communities_info}
+
+Instructions:
+- Extract key information relevant to the question
+- Preserve important details, entities, and relationships
+- Create a concise summary that captures the essential insights
+- Maintain factual accuracy - do not infer beyond what's stated
+- Keep the summary under 500 words
+
+Summary:"""
+
+
+def build_map_reduce_final_synthesis_prompt(query: str, summaries: str) -> str:
+    """
+    Build prompt for final synthesis of batch summaries (reduce phase).
+
+    Args:
+        query: User's question
+        summaries: Combined batch summaries to synthesize
+
+    Returns:
+        Formatted prompt for final answer synthesis
+    """
+    return f"""
+Synthesize the following summaries to provide a comprehensive answer to the user's question.
+
+Question: {query}
+
+Summaries:
+{summaries}
+
+Instructions:
+- Combine insights from all summaries into a coherent, comprehensive answer
+- Resolve any contradictions or inconsistencies
+- Highlight key themes, patterns, and insights
+- Structure the answer logically with clear sections if needed
+- Ensure the answer directly addresses the user's question
+- Be thorough but avoid unnecessary repetition
+
+Final Answer:"""

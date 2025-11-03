@@ -6,8 +6,10 @@ import { AlertCircle, CheckCircle2, Compass, FileText, Loader2, Plus, Settings2,
 
 import DocumentUpload from '@/components/document-upload/document-upload';
 import QueryInterface from '@/components/query-interface';
+import ToGQueryInterface from '@/components/tog-query-interface';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface Document {
   id: string;
@@ -266,7 +268,18 @@ export default function DashboardHomeClient({ session }: { session: Session }) {
 
             {hasSources ? (
               <div className="max-h-[620px] overflow-y-auto pr-1">
-                <QueryInterface accessToken={accessToken} documents={documents} />
+                <Tabs defaultValue="graphrag" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="graphrag">GraphRAG</TabsTrigger>
+                    <TabsTrigger value="tog">Tree of Graphs (ToG)</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="graphrag" className="mt-4">
+                    <QueryInterface accessToken={accessToken} documents={documents} />
+                  </TabsContent>
+                  <TabsContent value="tog" className="mt-4">
+                    <ToGQueryInterface accessToken={accessToken} documents={documents} />
+                  </TabsContent>
+                </Tabs>
               </div>
             ) : (
               <div className="flex h-[500px] flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-gray-200 text-center">

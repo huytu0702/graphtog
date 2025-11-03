@@ -5,8 +5,8 @@ Query model for PostgreSQL database
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text, Float, Integer
+from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 
 from app.db.postgres import Base
@@ -24,9 +24,15 @@ class Query(Base):
     response = Column(Text, nullable=True)
     reasoning_chain = Column(Text, nullable=True)  # JSON string with reasoning steps
     query_mode = Column(String(20), nullable=True)  # graphrag, tog, hybrid (Phase 4)
-    confidence_score = Column(String(10), nullable=True)  # Confidence of the answer
+    confidence_score = Column(Float, nullable=True)  # Confidence of the answer
+    processing_time_ms = Column(Integer, nullable=True)  # Processing time in milliseconds
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # ToG-specific fields
+    tog_config = Column(JSON, nullable=True)  # ToG configuration used
+    reasoning_path = Column(JSON, nullable=True)  # Complete reasoning path
+    retrieved_triplets = Column(JSON, nullable=True)  # Retrieved knowledge triplets
 
     # Relationships
     user = relationship("User", back_populates="queries")

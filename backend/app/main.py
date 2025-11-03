@@ -133,12 +133,13 @@ from app.api.endpoints import (
     auth,
     documents,
     queries,
+    tog,
     admin,
     communities,
     advanced_features,
     visualization,
     cache,
-    retrieval,
+    # retrieval,  # Temporarily disabled - retrieval_service.py was removed
     analyze,
 )
 
@@ -146,12 +147,13 @@ from app.api.endpoints import (
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(documents.router, prefix="/api/documents")
 app.include_router(queries.router, prefix="/api/queries")
+app.include_router(tog.router, prefix="/api/queries")
 app.include_router(admin.router, prefix="/api/admin")
 app.include_router(communities.router, prefix="/api/communities")
 app.include_router(advanced_features.router, prefix="/api/extract")
 app.include_router(visualization.router, prefix="/api/visualize")
 app.include_router(cache.router, prefix="/api/cache")
-app.include_router(retrieval.router, prefix="/api/retrieve")
+# app.include_router(retrieval.router, prefix="/api/retrieve")  # Temporarily disabled
 app.include_router(analyze.router, prefix="/api/analyze")
 
 

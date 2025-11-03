@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException
 
 from app.services.community_detection import community_detection_service
 from app.services.community_summarization import community_summarization_service
-from app.services.retrieval_service import retrieval_service
 
 logger = logging.getLogger(__name__)
 

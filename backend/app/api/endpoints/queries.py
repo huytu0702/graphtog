@@ -34,14 +34,21 @@ class QueryRequest(Dict):
 @router.post("")
 async def create_query(
     request: dict,
+    query_type: Optional[str] = None,
+    tog_config: Optional[Dict] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Dict:
     """
-    Process a query and get answer
+    Process a query and get answer with automatic or manual query type selection.
+
+    Supports: local, global, hybrid, and tog (Tree of Graphs) queries.
+    If query_type is not specified, automatically classifies the query.
 
     Args:
         request: QueryRequest with query text
+        query_type: Optional query type (local/global/hybrid/tog/auto)
+        tog_config: Optional ToG configuration for tog queries
         current_user: Current authenticated user
         db: Database session
 
@@ -52,6 +59,7 @@ async def create_query(
         query_text = request.get("query", "").strip()
         hop_limit = request.get("hop_limit", 1)
         document_id = request.get("document_id")  # Optional
+        document_ids = request.get("document_ids")  # For ToG queries
 
         # Get user_id from authenticated session
         user_id = current_user.id
@@ -62,21 +70,76 @@ async def create_query(
         if len(query_text) > 1000:
             raise HTTPException(status_code=400, detail="Query too long (max 1000 characters)")
 
-        # Process query
-        logger.info(f"Processing query for user {user_id}: {query_text}")
-        result = query_service.process_query(query_text, hop_limit, document_id)
+        # Handle query type selection
+        if query_type is None or query_type == "auto":
+            # Auto-classify query type
+            from app.services.query_service import QueryService
+            enhanced_query_service = QueryService()
+            query_type = await enhanced_query_service._classify_query_type(query_text)
+            logger.info(f"Auto-classified query as type: {query_type}")
 
-        # Store query in database - only use fields that exist in Query model
+        # Process query with appropriate method
+        logger.info(f"Processing {query_type} query for user {user_id}: {query_text}")
+
+        if query_type == "tog":
+            # Handle ToG query
+            from app.services.tog_service import ToGService, ToGConfig
+            from app.services.llm_service import LLMService
+
+            # Initialize services
+            tog_service = ToGService(graph_service, LLMService())
+            config = tog_config or ToGConfig()
+
+            # Convert document_id to document_ids list if needed
+            if document_id and not document_ids:
+                document_ids = [document_id]
+
+            # Process ToG query
+            reasoning_path = await tog_service.process_query(query_text, config)
+
+            result = {
+                "answer": reasoning_path.final_answer or "No answer generated",
+                "query_type": "tog",
+                "confidence_score": reasoning_path.confidence_score,
+                "reasoning_path": reasoning_path.steps,
+                "retrieved_triplets": reasoning_path.retrieved_triplets,
+                "processing_time_ms": 0,  # Would need to track this
+            }
+
+        elif query_type == "global":
+            # Handle global query (existing logic)
+            result = query_service.process_global_query(query_text)
+
+        elif query_type == "local":
+            # Handle local query (existing logic)
+            result = query_service.process_query(query_text, hop_limit, document_id)
+
+        else:
+            # Default to existing logic
+            result = query_service.process_query(query_text, hop_limit, document_id)
+
+        # Store query in database - handle both legacy and ToG fields
         try:
-            db_query = Query(
-                user_id=user_id,
-                document_id=document_id,
-                query_text=query_text,
-                response=result.get("answer", ""),  # Map answer to response
-                reasoning_chain=str(result.get("context", "")),  # Map context to reasoning_chain
-                query_mode=result.get("query_type", "unknown"),  # Map query_type to query_mode
-                confidence_score=result.get("confidence_score", "0.0"),
-            )
+            # Prepare base fields
+            db_kwargs = {
+                "user_id": user_id,
+                "document_id": document_id,
+                "query_text": query_text,
+                "response": result.get("answer", ""),
+                "reasoning_chain": str(result.get("context", "")),
+                "query_mode": result.get("query_type", query_type or "unknown"),
+                "confidence_score": float(result.get("confidence_score", 0.0)),
+                "processing_time_ms": result.get("processing_time_ms"),
+            }
+
+            # Add ToG-specific fields if this is a ToG query
+            if query_type == "tog" and tog_config:
+                import json
+                db_kwargs["tog_config"] = tog_config.dict()
+                db_kwargs["reasoning_path"] = result.get("reasoning_path", [])
+                db_kwargs["retrieved_triplets"] = result.get("retrieved_triplets", [])
+
+            db_query = Query(**db_kwargs)
             db.add(db_query)
             db.commit()
             db.refresh(db_query)
@@ -122,15 +185,26 @@ async def get_query(
         if db_query.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Access denied")
 
-        return {
+        response_data = {
             "id": str(db_query.id),
             "query_text": db_query.query_text,
             "query_mode": db_query.query_mode,  # Changed from query_type
             "response": db_query.response,  # Changed from answer
             "reasoning_chain": db_query.reasoning_chain,
             "confidence_score": db_query.confidence_score,
+            "processing_time_ms": db_query.processing_time_ms,
             "created_at": db_query.created_at.isoformat() if db_query.created_at else None,
         }
+
+        # Add ToG-specific fields if this is a ToG query
+        if db_query.query_mode == "tog":
+            response_data.update({
+                "tog_config": db_query.tog_config,
+                "reasoning_path": db_query.reasoning_path,
+                "retrieved_triplets": db_query.retrieved_triplets,
+            })
+
+        return response_data
 
     except HTTPException:
         raise
@@ -175,7 +249,11 @@ async def get_query_results(
                     "query_text": q.query_text,
                     "query_mode": q.query_mode,  # Changed from status
                     "response": q.response,  # Changed from answer
+                    "confidence_score": q.confidence_score,
+                    "processing_time_ms": q.processing_time_ms,
                     "created_at": q.created_at.isoformat() if q.created_at else None,
+                    # Include ToG indicator
+                    "is_tog_query": q.query_mode == "tog",
                 }
                 for q in queries
             ],
@@ -226,7 +304,11 @@ async def list_queries(
                     "query_text": q.query_text,
                     "query_mode": q.query_mode,  # Changed from status
                     "response": q.response,  # Changed from answer
+                    "confidence_score": q.confidence_score,
+                    "processing_time_ms": q.processing_time_ms,
                     "created_at": q.created_at.isoformat() if q.created_at else None,
+                    # Include ToG indicator
+                    "is_tog_query": q.query_mode == "tog",
                 }
                 for q in queries
             ],
