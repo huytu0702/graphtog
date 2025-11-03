@@ -189,6 +189,7 @@ RETURN AVG(degree), MAX(degree), MIN(degree)
 - Adapted algorithm pseudocode
 - Schema modification requirements
 
+
 ---
 
 ### Task 1.5: API Design & Specifications
@@ -1352,6 +1353,60 @@ Provide a concise answer and indicate if you're uncertain.
 
     return response, 0.3  # Low confidence for fallback
 ```
+
+### Coding Phase 2 Execution Plan
+
+**Phase 1 dependencies leveraged**
+- Architecture and integration analysis (docs/phase1/tog_phase1_deliverables.md) defines how `backend/app/services/query_service.py` and `backend/app/services/graph_service.py` will host ToG orchestration.
+- Neo4j schema validation confirms `Entity`, `RELATED_TO`, `Community`, and `Claim` structures are production ready for multi-hop traversal without additional migrations.
+- Prompt adaptation strategy is documented; placeholders already exist in `backend/app/services/prompt.py` for ToG-specific templates.
+- API contract for optional `tog_config` payload and reasoning block is established, keeping Phase 2 coding backwards compatible.
+
+**Milestone sequencing**
+
+| Milestone | Focus | Key Deliverables | Dependencies |
+| --- | --- | --- | --- |
+| M2.1 (Week 1) | ToG service scaffolding & config wiring | `ToGReasoningEngine` constructor, async `reason` loop skeleton, Pydantic models in `backend/app/schemas/tog_query.py`, logging hooks | Dependency map and DI setup from Phase 1 |
+| M2.2 (Week 2) | Graph exploration loop | `_extract_topic_entities`, `_explore_relations`, `_get_candidate_entities`, `_score_entities`, `_select_top_entities` implemented with GraphService helpers and prompt wiring | Prompt templates and graph metadata access |
+| M2.3 (Week 3) | Sufficiency + answer synthesis + harness | `_check_sufficiency`, `_generate_answer`, `_generate_fallback_answer`, reasoning path serialization, async test harness | Config toggles, caching layer, Gemini stubs |
+
+**Detailed work items**
+
+1. `M2.1 ToG service foundation`
+   - Create `backend/app/services/tog_service.py` with dependency-injected `GraphService` and `LLMService`, maintaining search state per Task 2.1.
+   - Materialize `ToGConfig`, `ToGReasoningStep`, `ToGTriplet`, and `ToGQueryResponse` in `backend/app/schemas/tog_query.py` with defaults from Phase 1 hyperparameter table.
+   - Register `ToGReasoningEngine` within FastAPI dependency wiring so `QueryService` can resolve it during request handling.
+   - Add constructor/unit tests in `backend/tests/services/test_tog_service.py` covering config validation and logging instrumentation.
+
+2. `M2.2 Exploration loop implementation`
+   - Implement `_extract_topic_entities` with entity sampling from `GraphService` plus Gemini prompt and fuzzy fallback, exercising fixtures from Phase 1 graph slices.
+   - Implement `_explore_relations` and supporting `GraphService` helper to return relation metadata with confidence scores and caching hooks.
+   - Implement `_get_candidate_entities`, `_score_entities`, and `_select_top_entities`, ensuring deduplication, relation context, and reasoning path updates (Tasks 2.4-2.5).
+   - Introduce Redis-backed caching via `backend/app/services/cache_service.py` (or in-memory shim) for relation/entity lists to hit performance targets.
+   - Add async unit tests exercising breadth/width limits using Neo4j fixtures or stubs to verify pruning.
+
+3. `M2.3 Sufficiency & answer synthesis`
+   - Implement `_check_sufficiency` with LLM prompt plus fallback heuristics, persisting confidence into `ToGReasoningStep`.
+   - Implement `_generate_answer` and `_generate_fallback_answer`, including reasoning chain serialization for LangSmith exports (Task 2.7).
+   - Wire `ToGReasoningEngine.reason` into `backend/app/services/query_service.py` behind the `mode == "tog"` branch with structured response assembly.
+   - Deliver integration tests hitting FastAPI endpoints with mocked Gemini and Neo4j, verifying schema compliance, logging, and latency.
+
+**Testing & validation**
+- Unit tests for each private method with Gemini and Neo4j fixtures, maintaining >= 80% coverage for `backend/app/services/tog_service.py`.
+- Contract tests for prompt builders to guarantee JSON-only outputs and error handling.
+- Integration tests for `QueryService.process_query` ToG path plus load test capturing iteration latency budgets.
+- QA checklist: sufficiency gating, answer construction, LangSmith trace emission, and fallback behavior.
+
+**Resourcing & prerequisites**
+- Seed Neo4j fixture dataset exported from Phase 1 knowledge graph snapshot.
+- Gemini mock harness or recorded responses for deterministic testing.
+- Redis service via docker-compose (or in-memory adapter) to support caching experiments during Phase 2.
+
+**Definition of done**
+- `ToGReasoningEngine.reason` returns populated `ToGQueryResponse` objects with reasoning path, triplets, and confidence for sample queries.
+- Test suites in `backend/tests/services` and `backend/tests/api` pass in CI alongside linting and type checks.
+- Updated documentation in `docs/api/query.md` and new runbook entry (`docs/phase2/tog_coding.md`) describing setup, config, and troubleshooting.
+- Demo script or notebook captures end-to-end ToG reasoning for stakeholder review.
 
 ---
 
