@@ -51,6 +51,16 @@ class ToGReasoningStepSchema(BaseModel):
     reasoning_notes: Optional[str] = Field(default=None, description="Reasoning notes")
 
 
+class ToGTripletSchema(BaseModel):
+    """Knowledge triplet schema."""
+
+    subject: str = Field(description="Subject entity")
+    relation: str = Field(description="Relation type")
+    object: str = Field(description="Object entity")
+    confidence: float = Field(default=1.0, description="Triplet confidence")
+    source: Optional[str] = Field(default=None, description="Source of triplet")
+
+
 class ToGReasoningPathSchema(BaseModel):
     """Complete ToG reasoning path."""
 
@@ -58,6 +68,7 @@ class ToGReasoningPathSchema(BaseModel):
     final_answer: Optional[str] = Field(default=None, description="Final generated answer")
     confidence_score: float = Field(default=0.0, description="Overall confidence score")
     sufficiency_status: str = Field(default="unknown", description="Sufficiency status: unknown, sufficient, insufficient")
+    retrieved_triplets: List[ToGTripletSchema] = Field(default_factory=list, description="Retrieved knowledge triplets")
 
 
 class ToGQueryRequest(BaseModel):
@@ -76,6 +87,7 @@ class ToGQueryResponse(BaseModel):
     query_type: str = Field(default="tog", description="Query type identifier")
     confidence_score: float = Field(description="Answer confidence score")
     processing_time: Optional[float] = Field(default=None, description="Processing time in seconds")
+    query_id: Optional[str] = Field(default=None, description="Database query ID for visualization")
 
 
 class ToGExplainRequest(BaseModel):

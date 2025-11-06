@@ -147,7 +147,7 @@ from app.api.endpoints import (
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(documents.router, prefix="/api/documents")
 app.include_router(queries.router, prefix="/api/queries")
-app.include_router(tog.router, prefix="/api/queries")
+app.include_router(tog.router, prefix="/api")
 app.include_router(admin.router, prefix="/api/admin")
 app.include_router(communities.router, prefix="/api/communities")
 app.include_router(advanced_features.router, prefix="/api/extract")

@@ -9,7 +9,7 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Network, GitBranch, ChevronRight, Zap, Cpu, Brain } from 'lucide-react';
+import { Loader2, Network, GitBranch, ChevronRight, Zap, Cpu, Brain, Eye } from 'lucide-react';
 
 interface ToGConfig {
   search_width: number;
@@ -66,6 +66,8 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<ToGQueryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [visualization, setVisualization] = useState<any>(null);
+  const [loadingVisualization, setLoadingVisualization] = useState(false);
 
   // ToG configuration
   const [config, setConfig] = useState<ToGConfig>({
@@ -84,6 +86,29 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
   // Get completed documents
   const completedDocs = documents.filter((doc) => doc.status === 'completed');
 
+  const loadVisualization = async (queryId: number) => {
+    setLoadingVisualization(true);
+    try {
+      const res = await fetch(`/api/tog/visualize/${queryId}`, {
+        headers: {
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to load visualization: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      setVisualization(data);
+    } catch (err) {
+      console.error('Failed to load visualization:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load visualization');
+    } finally {
+      setLoadingVisualization(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -94,16 +119,37 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
     setResponse(null);
 
     try {
-      const res = await fetch('/api/queries', {
+      // First validate config
+      const configRes = await fetch('/api/tog/config', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
         },
         body: JSON.stringify({
-          query: question,
-          query_type: 'tog',
-          tog_config: config,
+          config: config,
+        }),
+      });
+
+      if (!configRes.ok) {
+        throw new Error(`Config validation failed: ${configRes.statusText}`);
+      }
+
+      const configValidation = await configRes.json();
+      if (!configValidation.is_valid) {
+        throw new Error(`Invalid config: ${configValidation.validation_errors.join(', ')}`);
+      }
+
+      // Then submit query
+      const res = await fetch('/api/tog/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+        },
+        body: JSON.stringify({
+          question: question,
+          config: config,
           document_ids: selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined,
         }),
       });
@@ -330,27 +376,43 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
       {/* Results */}
       {response && (
         <Tabs defaultValue="answer" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="answer">Answer</TabsTrigger>
-            <TabsTrigger value="reasoning">Reasoning Path</TabsTrigger>
-            <TabsTrigger value="triplets">Retrieved Triplets</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-4">
+        <TabsTrigger value="answer">Answer</TabsTrigger>
+        <TabsTrigger value="reasoning">Reasoning Path</TabsTrigger>
+        <TabsTrigger value="triplets">Retrieved Triplets</TabsTrigger>
+          <TabsTrigger value="visualization">Visualization</TabsTrigger>
           </TabsList>
 
           <TabsContent value="answer">
-            <Card>
-              <CardHeader>
-                <CardTitle>Answer</CardTitle>
-                <div className="flex gap-2 items-center text-sm text-muted-foreground">
-                  <Badge variant="outline">
-                    Confidence: {(response.confidence * 100).toFixed(1)}%
-                  </Badge>
-                  <Badge variant="outline">
-                    {response.processing_time_ms}ms
-                  </Badge>
-                  <Badge variant="outline" className="flex items-center gap-1">
-                    {getPruningMethodIcon(config.pruning_method)}
-                    {config.pruning_method.toUpperCase()}
-                  </Badge>
+          <Card>
+          <CardHeader>
+          <CardTitle>Answer</CardTitle>
+          <div className="flex gap-2 items-center justify-between">
+          <div className="flex gap-2 items-center text-sm text-muted-foreground">
+          <Badge variant="outline">
+              Confidence: {(response.confidence * 100).toFixed(1)}%
+            </Badge>
+          <Badge variant="outline">
+              {response.processing_time_ms}ms
+            </Badge>
+          <Badge variant="outline" className="flex items-center gap-1">
+            {getPruningMethodIcon(config.pruning_method)}
+              {config.pruning_method.toUpperCase()}
+              </Badge>
+              </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => response.query_id && loadVisualization(response.query_id)}
+                    disabled={loadingVisualization || !response.query_id}
+                  >
+                    {loadingVisualization ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Eye className="w-4 h-4 mr-2" />
+                    )}
+                    Visualize
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent>
@@ -372,7 +434,7 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {response.reasoning_path.map((step, idx) => (
+                  {response.reasoning_path.steps?.map((step, idx) => (
                     <div key={idx} className="border-l-2 border-blue-500 pl-4">
                       <div className="flex items-center gap-2 mb-2">
                         <Badge>Depth {step.depth}</Badge>
@@ -387,7 +449,7 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
                         <div>
                           <strong>Entities Explored:</strong>
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {step.entities_explored.map((entity, i) => (
+                            {step.entities_explored?.map((entity, i) => (
                               <Badge key={i} variant="secondary">{entity.name}</Badge>
                             ))}
                           </div>
@@ -396,7 +458,7 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
                         <div>
                           <strong>Relations Selected:</strong>
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {step.relations_selected.map((rel, i) => (
+                            {step.relations_selected?.map((rel, i) => (
                               <Badge key={i} className="bg-blue-100">{rel.type}</Badge>
                             ))}
                           </div>
@@ -416,7 +478,7 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
                         )}
                       </div>
 
-                      {idx < response.reasoning_path.length - 1 && (
+                      {idx < (response.reasoning_path.steps?.length || 0) - 1 && (
                         <ChevronRight className="w-4 h-4 text-muted-foreground mt-2" />
                       )}
                     </div>
@@ -436,7 +498,7 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {response.retrieved_triplets.map((triplet, idx) => (
+                  {response.reasoning_path.retrieved_triplets?.map((triplet, idx) => (
                     <div
                       key={idx}
                       className="flex items-center gap-2 p-3 bg-gray-50 rounded-md text-sm"
@@ -455,6 +517,35 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
                     </div>
                   ))}
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+              <TabsContent value="visualization">
+                  <Card>
+                      <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Network className="w-5 h-5" />
+                  Reasoning Path Visualization
+                </CardTitle>
+                <CardDescription>
+                  Interactive graph visualization of the ToG reasoning process
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {visualization ? (
+                  <div className="bg-gray-50 p-4 rounded-md text-sm">
+                    <p className="text-muted-foreground mb-2">Visualization data loaded:</p>
+                    <pre className="whitespace-pre-wrap text-xs bg-white p-2 rounded border overflow-auto max-h-96">
+                      {JSON.stringify(visualization, null, 2)}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Network className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>Click "Visualize" to load the reasoning path graph</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

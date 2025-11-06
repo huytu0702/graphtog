@@ -19,13 +19,11 @@ class GraphService:
 
     def __init__(self):
         """Initialize graph service"""
-        self.session = None
+        pass
 
     def get_session(self) -> Session:
-        """Get or create Neo4j session"""
-        if not self.session:
-            self.session = get_neo4j_session()
-        return self.session
+        """Get a new Neo4j session (always creates a fresh session)"""
+        return get_neo4j_session()
 
     def init_schema(self) -> bool:
         """

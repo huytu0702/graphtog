@@ -248,16 +248,16 @@ class ToGService:
             """
 
         query += """
-        RETURN DISTINCT e.name as name
-        ORDER BY e.mention_count DESC
+        WITH DISTINCT e.name as name, e.mention_count as mention_count
+        RETURN name
+        ORDER BY mention_count DESC
         LIMIT 1000
         """
 
         with self.graph_service.get_session() as session:
             result = session.run(query, {"document_ids": document_ids})
             entities = [record["name"] for record in result]
-
-        return entities
+            return entities
 
     def _fuzzy_match_entity(
         self, target_entity: str, available_entities: List[str]
@@ -339,7 +339,7 @@ class ToGService:
             record = result.single()
 
             if record:
-                return ToGEntity(
+                entity = ToGEntity(
                     id=record["id"],
                     name=record["name"],
                     type=record["type"],
@@ -347,8 +347,9 @@ class ToGService:
                     confidence=record.get("confidence", 1.0),
                     document_id=record.get("document_id"),
                 )
+                return entity
 
-        return None
+            return None
 
     async def _explore_relations(
         self, question: str, entities: List[ToGEntity], config: ToGConfig
@@ -380,15 +381,19 @@ class ToGService:
         logger.debug(f"Found {len(new_relations)} new relations to score")
 
         # Step 3: Use pruning method to score relations
-        relation_names = [r["relation_type"] for r in new_relations]
+        relation_names = [r["relation_type"] for r in new_relations if r.get("relation_type")]
+
+        if not relation_names:
+            logger.warning("No valid relation names found after filtering")
+            return []
 
         scored_relations = await self.pruning_method.score_relations(
             question=question,
             relations=relation_names,
             context={
-                "entities": ", ".join([e.name for e in entities]),
+                "entities": ", ".join([e.name for e in entities if e.name]),
                 "previous_relations": (
-                    ", ".join(self.explored_relations) if self.explored_relations else "None"
+                    ", ".join([r for r in self.explored_relations if r]) if self.explored_relations else "None"
                 ),
             },
         )
@@ -464,15 +469,20 @@ class ToGService:
 
             relations = []
             for record in result:
-                relations.append(
-                    {
-                        "relation_type": record["relation_type"],
-                        "frequency": record["frequency"],
-                        "avg_confidence": record["avg_confidence"],
-                    }
-                )
+                relation_type = record.get("relation_type")
+                if relation_type:  # Skip None/null relation types
+                    relations.append(
+                        {
+                            "relation_type": relation_type,
+                            "frequency": record.get("frequency", 0),
+                            "avg_confidence": record.get("avg_confidence", 0.0),
+                        }
+                    )
+                else:
+                    logger.warning(f"Skipping relation with null type for entities: {entity_names[:3]}")
 
-        return relations
+            logger.debug(f"Found {len(relations)} valid relations for {len(entity_names)} entities")
+            return relations
 
     def _get_entity_relations_optimized(
         self, entities: List[ToGEntity], document_ids: Optional[List[int]]
@@ -488,7 +498,8 @@ class ToGService:
             AND e.document_id IN $document_ids
             AND other.document_id IN $document_ids
             AND r.confidence > 0.3
-            WITH r.type as relation_type, count(*) as frequency, avg(r.confidence) as avg_confidence
+            WITH COALESCE(r.type, r.description, type(r)) as relation_type, count(*) as frequency, avg(r.confidence) as avg_confidence
+            WHERE relation_type IS NOT NULL
             RETURN relation_type, frequency, avg_confidence
             ORDER BY frequency DESC
             LIMIT 50
@@ -497,7 +508,8 @@ class ToGService:
             query = """
             MATCH (e:Entity)-[r:RELATED_TO]->(other:Entity)
             WHERE e.name IN $entity_names
-            WITH r.type as relation_type, count(*) as frequency, avg(r.confidence) as avg_confidence
+            WITH COALESCE(r.type, r.description, type(r)) as relation_type, count(*) as frequency, avg(r.confidence) as avg_confidence
+            WHERE relation_type IS NOT NULL
             RETURN relation_type, frequency, avg_confidence
             ORDER BY frequency DESC
             LIMIT 50
@@ -510,15 +522,20 @@ class ToGService:
 
             relations = []
             for record in result:
-                relations.append(
-                    {
-                        "relation_type": record["relation_type"],
-                        "frequency": record["frequency"],
-                        "avg_confidence": record["avg_confidence"],
-                    }
-                )
+                relation_type = record.get("relation_type")
+                if relation_type:  # Skip None/null relation types
+                    relations.append(
+                        {
+                            "relation_type": relation_type,
+                            "frequency": record.get("frequency", 0),
+                            "avg_confidence": record.get("avg_confidence", 0.0),
+                        }
+                    )
+                else:
+                    logger.warning(f"Skipping relation with null type for entities: {entity_names[:3]}")
 
-        return relations
+            logger.debug(f"Found {len(relations)} valid relations for {len(entity_names)} entities")
+            return relations
 
     async def _expand_entity_from_relation(
         self, relation: ToGRelation, document_ids: Optional[List[int]]
@@ -623,7 +640,7 @@ class ToGService:
                     )
                 )
 
-                return entities
+            return entities
 
     async def _score_entities_for_relation(
         self, question: str, relation: ToGRelation, candidate_entities: List[ToGEntity]
@@ -789,12 +806,15 @@ class ToGService:
 
             logger.info(f"Exploring depth {depth + 1}/{config.search_depth}")
 
-            # Create reasoning step
-            step = ToGReasoningStep(depth=depth + 1, entities_explored=current_entities)
-
             # Explore relations for current entities
             relations = await self._explore_relations_safe(question, current_entities, config)
-            step.relations_selected = relations
+
+            # Create reasoning step
+            step = ToGReasoningStep(
+                depth=depth + 1,
+                entities_explored=current_entities,
+                relations_selected=relations
+            )
 
             if not relations:
                 logger.info(f"No new relations found at depth {depth + 1}")
@@ -822,15 +842,6 @@ class ToGService:
             # Limit entities per depth
             next_entities = next_entities[: config.num_retain_entity]
 
-            if not next_entities:
-                logger.info(f"No new entities to explore at depth {depth + 1}")
-                break
-
-            # Cycle detection
-            if self._detect_cycle(current_entities, next_entities):
-                logger.warning("Cycle detected, stopping exploration")
-                break
-
             # Check sufficiency if enabled
             if config.enable_sufficiency_check:
                 sufficiency = await self._check_sufficiency_safe(question, relations, config)
@@ -840,13 +851,25 @@ class ToGService:
                 if sufficiency.get("sufficient", False):
                     logger.info(f"Sufficiency reached at depth {depth + 1}")
                     self.reasoning_path.sufficiency_status = "sufficient"
+                    self.reasoning_path.steps.append(step)
                     break
             else:
                 self.reasoning_path.sufficiency_status = "unknown"
 
+            # Add step to reasoning path
+            self.reasoning_path.steps.append(step)
+
+            if not next_entities:
+                logger.info(f"No new entities to explore at depth {depth + 1}")
+                break
+
+            # Cycle detection
+            if self._detect_cycle(current_entities, next_entities):
+                logger.warning("Cycle detected, stopping exploration")
+                break
+
             # Prepare for next depth
             current_entities = next_entities
-            self.reasoning_path.steps.append(step)
 
         # Phase 3: Generate final answer
         final_answer = await self._generate_final_answer_safe(question, config)

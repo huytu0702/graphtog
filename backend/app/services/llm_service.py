@@ -659,6 +659,36 @@ class LLMService:
                 "status": "error",
             }
 
+    async def generate_text(
+        self,
+        prompt: str,
+        temperature: float = 0.7,
+    ) -> str:
+        """
+        Generate text using LLM with given prompt and temperature.
+
+        Args:
+            prompt: The prompt to send to the LLM
+            temperature: Sampling temperature (0.0-1.0)
+
+        Returns:
+            Generated text response
+        """
+        self._apply_rate_limit()
+
+        def call_llm():
+            model = genai.GenerativeModel(
+                self.model_name,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=temperature,
+                )
+            )
+            response = model.generate_content(prompt)
+            return response.text
+
+        response_text = self._retry_with_backoff(call_llm)
+        return response_text.strip()
+
     def generate_answer(
         self,
         query: str,

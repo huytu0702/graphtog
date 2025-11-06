@@ -87,7 +87,7 @@ class ToGAnalyticsService:
                 "reasoning_temp": config.get("reasoning_temp", 0.0),
                 "pruning_method": config.get("pruning_method", "llm"),
                 "enable_sufficiency_check": config.get("enable_sufficiency_check", True),
-                "document_ids_count": len(config.get("document_ids", []))
+                "document_ids_count": len(config.get("document_ids") or [])
             },
 
             # Performance metrics
