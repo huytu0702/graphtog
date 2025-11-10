@@ -132,7 +132,8 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
       });
 
       if (!configRes.ok) {
-        throw new Error(`Config validation failed: ${configRes.statusText}`);
+        const errorData = await configRes.json().catch(() => ({ error: configRes.statusText }));
+        throw new Error(`Config validation failed: ${errorData.error || configRes.statusText}`);
       }
 
       const configValidation = await configRes.json();
@@ -140,27 +141,43 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
         throw new Error(`Invalid config: ${configValidation.validation_errors.join(', ')}`);
       }
 
-      // Then submit query
-      const res = await fetch('/api/tog/query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
-        },
-        body: JSON.stringify({
-          question: question,
-          config: config,
-          document_ids: selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined,
-        }),
-      });
+      // Then submit query with timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 130000); // 130 seconds client-side timeout (slightly longer than server)
 
-      if (!res.ok) {
-        throw new Error(`Query failed: ${res.statusText}`);
+      try {
+        const res = await fetch('/api/tog/query', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken && { 'Authorization': `Bearer ${accessToken}` }),
+          },
+          body: JSON.stringify({
+            question: question,
+            config: config,
+            document_ids: selectedDocumentIds.length > 0 ? selectedDocumentIds : undefined,
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ error: res.statusText }));
+          throw new Error(`Query failed: ${errorData.error || res.statusText}`);
+        }
+
+        const data: ToGQueryResponse = await res.json();
+        setResponse(data);
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+          throw new Error('Query timeout - the query took longer than 2 minutes. Try reducing search depth or width, or use a faster pruning method (BM25 or SentenceBERT).');
+        }
+        throw fetchErr;
       }
-
-      const data: ToGQueryResponse = await res.json();
-      setResponse(data);
     } catch (err) {
+      console.error('ToG query error:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
@@ -241,25 +258,33 @@ export default function ToGQueryInterface({ accessToken, documents = [] }: ToGQu
               </div>
             )}
 
-            <div className="flex gap-2">
-              <Button type="submit" disabled={loading}>
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  'Submit Query'
-                )}
-              </Button>
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <Button type="submit" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Reasoning through graph...
+                    </>
+                  ) : (
+                    'Submit Query'
+                  )}
+                </Button>
 
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowConfig(!showConfig)}
-              >
-                {showConfig ? 'Hide' : 'Show'} Configuration
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowConfig(!showConfig)}
+                >
+                  {showConfig ? 'Hide' : 'Show'} Configuration
+                </Button>
+              </div>
+
+              {loading && (
+                <p className="text-xs text-muted-foreground">
+                  Complex queries may take 30-60 seconds to complete...
+                </p>
+              )}
             </div>
 
             {/* Configuration Panel */}

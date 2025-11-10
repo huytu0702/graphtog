@@ -25,7 +25,7 @@ class ChunkingService:
     def __init__(
         self,
         chunk_size: int = 1000,
-        overlap_size: int = 500,
+        overlap_size: int = 300,
         min_chunk_size: int = 100,
     ):
         """
@@ -87,11 +87,7 @@ class ChunkingService:
             paragraph = paragraphs[para_index]
 
             # Calculate tokens if we add this paragraph
-            test_chunk = (
-                current_chunk + "\n\n" + paragraph
-                if current_chunk
-                else paragraph
-            )
+            test_chunk = current_chunk + "\n\n" + paragraph if current_chunk else paragraph
             token_count = self.count_tokens(test_chunk)
 
             if token_count <= self.chunk_size:
@@ -118,8 +114,7 @@ class ChunkingService:
                     if overlap_tokens > self.overlap_size:
                         # Find approximately where to cut for overlap
                         target_length = int(
-                            len(overlap_text)
-                            * (self.overlap_size / overlap_tokens)
+                            len(overlap_text) * (self.overlap_size / overlap_tokens)
                         )
                         # Keep the last portion that fits overlap
                         overlap_start = len(overlap_text) - target_length
@@ -134,7 +129,9 @@ class ChunkingService:
 
                 # Try to add paragraph to new chunk if it's not too large
                 if self.count_tokens(paragraph) <= self.chunk_size:
-                    current_chunk = paragraph if not current_chunk else current_chunk + "\n\n" + paragraph
+                    current_chunk = (
+                        paragraph if not current_chunk else current_chunk + "\n\n" + paragraph
+                    )
                     if not current_chunk_start:
                         current_chunk_start = text.find(paragraph)
                     para_index += 1

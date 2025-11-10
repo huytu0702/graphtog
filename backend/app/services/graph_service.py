@@ -254,7 +254,7 @@ class GraphService:
         textunit_id: str,
     ) -> bool:
         """
-        Create a MENTIONED_IN relationship between entity and text unit
+        Create a MENTIONS relationship from TextUnit to Entity (TextUnit)-[:MENTIONS]->(Entity)
 
         Args:
             entity_id: Entity ID
@@ -263,13 +263,12 @@ class GraphService:
         Returns:
             True if successful, False otherwise
         """
+        session = self.get_session()
         try:
-            session = self.get_session()
-
             query = """
             MATCH (e:Entity {id: $entity_id})
             MATCH (t:TextUnit {id: $textunit_id})
-            MERGE (e)-[r:MENTIONED_IN]->(t)
+            MERGE (t)-[r:MENTIONS]->(e)
             ON CREATE SET r.created_at = datetime()
             RETURN r
             """
@@ -285,6 +284,8 @@ class GraphService:
         except Exception as e:
             logger.error(f"Mention relationship creation error: {e}")
             return False
+        finally:
+            session.close()
 
     def create_relationship(
         self,
@@ -642,9 +643,8 @@ class GraphService:
         Returns:
             Claim ID if successful, None otherwise
         """
+        session = self.get_session()
         try:
-            session = self.get_session()
-
             # Generate claim ID using subject, object, type, description, and source_text
             # Include source_text to ensure uniqueness when same claim appears in different contexts
             claim_key = f"{subject_entity_name}:{object_entity_name}:{claim_type}:{description}:{source_text or ''}"
@@ -704,6 +704,8 @@ class GraphService:
             else:
                 logger.error(f"Claim creation error: {e}")
                 return None
+        finally:
+            session.close()
 
     def link_claim_to_entities(
         self,
@@ -726,9 +728,8 @@ class GraphService:
         Returns:
             True if successful, False otherwise
         """
+        session = self.get_session()
         try:
-            session = self.get_session()
-
             # Helper function to find entity with fuzzy matching
             def find_entity_fuzzy(entity_name: str) -> Optional[str]:
                 """
@@ -851,6 +852,8 @@ class GraphService:
         except Exception as e:
             logger.error(f"Claim-entity linking error: {e}")
             return False
+        finally:
+            session.close()
 
     def link_claim_to_textunit(
         self,
@@ -867,9 +870,8 @@ class GraphService:
         Returns:
             True if successful, False otherwise
         """
+        session = self.get_session()
         try:
-            session = self.get_session()
-
             query = """
             MATCH (c:Claim {id: $claim_id})
             MATCH (t:TextUnit {id: $textunit_id})
@@ -889,6 +891,8 @@ class GraphService:
         except Exception as e:
             logger.error(f"Claim-TextUnit linking error: {e}")
             return False
+        finally:
+            session.close()
 
     def get_claims_for_entity(
         self,

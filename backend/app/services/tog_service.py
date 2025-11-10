@@ -56,6 +56,7 @@ class ToGEntity:
     description: Optional[str] = None
     confidence: float = 1.0
     document_id: Optional[int] = None
+    source_texts: List[str] = field(default_factory=list)  # Source text chunks mentioning this entity
 
     def __hash__(self):
         return hash((self.id, self.name))
@@ -76,6 +77,7 @@ class ToGRelation:
     description: Optional[str] = None
     confidence: float = 1.0
     score: float = 0.0  # LLM-assigned relevance score
+    source_texts: List[str] = field(default_factory=list)  # Source text chunks for this relationship
 
     def __hash__(self):
         return hash((self.type, self.source_entity.id, self.target_entity.id))
@@ -317,7 +319,7 @@ class ToGService:
     def _get_entity_by_name(
         self, entity_name: str, document_ids: Optional[List[int]]
     ) -> Optional[ToGEntity]:
-        """Get full entity object by name from graph."""
+        """Get full entity object by name from graph with source text chunks."""
         query = """
         MATCH (e:Entity {name: $name})
         """
@@ -328,9 +330,15 @@ class ToGService:
             """
 
         query += """
+        // Retrieve TextUnits that mention this entity
+        OPTIONAL MATCH (e)<-[:MENTIONS]-(tu:TextUnit)
+
+        WITH e, collect(DISTINCT tu.text) as text_chunks
+
         RETURN e.id as id, e.name as name, e.type as type,
                e.description as description, e.confidence as confidence,
-               e.document_id as document_id
+               e.document_id as document_id,
+               text_chunks[0..3] as source_texts
         LIMIT 1
         """
 
@@ -339,6 +347,10 @@ class ToGService:
             record = result.single()
 
             if record:
+                source_texts = record.get("source_texts", [])
+                # Filter out None values and limit to first 3 non-empty chunks
+                source_texts = [text for text in source_texts if text][:3]
+
                 entity = ToGEntity(
                     id=record["id"],
                     name=record["name"],
@@ -346,6 +358,7 @@ class ToGService:
                     description=record.get("description"),
                     confidence=record.get("confidence", 1.0),
                     document_id=record.get("document_id"),
+                    source_texts=source_texts,
                 )
                 return entity
 
@@ -538,7 +551,7 @@ class ToGService:
             return relations
 
     async def _expand_entity_from_relation(
-        self, relation: ToGRelation, document_ids: Optional[List[int]]
+        self, relation: ToGRelation, document_ids: Optional[List[int]], question: str = ""
     ) -> Optional[ToGEntity]:
         """
         Expand to find target entities for a given relation.
@@ -560,20 +573,21 @@ class ToGService:
         if len(candidate_entities) == 1:
             return candidate_entities[0]
 
-        # Use LLM to score and select the best entity
-        scored_entities = await self._score_entities_for_relation(
-            question, relation, candidate_entities
-        )
+        # Use LLM to score and select the best entity (if question provided)
+        if question:
+            scored_entities = await self._score_entities_for_relation(
+                question, relation, candidate_entities
+            )
 
-        # Return the highest scored entity
-        if scored_entities:
-            best_entity = max(scored_entities, key=lambda x: x.get("score", 0))
-            entity_name = best_entity.get("entity_name", "")
+            # Return the highest scored entity
+            if scored_entities:
+                best_entity = max(scored_entities, key=lambda x: x.get("score", 0))
+                entity_name = best_entity.get("entity_name", "")
 
-            # Find the actual entity object
-            for entity in candidate_entities:
-                if entity.name == entity_name:
-                    return entity
+                # Find the actual entity object
+                for entity in candidate_entities:
+                    if entity.name == entity_name:
+                        return entity
 
         # Fallback: return first candidate
         return candidate_entities[0] if candidate_entities else None
@@ -595,7 +609,7 @@ class ToGService:
     def _get_related_entities(
         self, source_entity_name: str, relation_type: str, document_ids: Optional[List[int]]
     ) -> List[ToGEntity]:
-        """Get entities related to source entity via specific relation type."""
+        """Get entities related to source entity via specific relation type with source text chunks."""
         query = """
         MATCH (source:Entity)-[r:RELATED_TO]->(target:Entity)
         WHERE source.name = $source_name
@@ -610,9 +624,16 @@ class ToGService:
             )
 
         query += """
+        // Retrieve TextUnits that mention the target entity
+        OPTIONAL MATCH (target)<-[:MENTIONS]-(tu:TextUnit)
+
+        WITH target, r, collect(DISTINCT tu.text) as text_chunks
+
         RETURN target.id as id, target.name as name, target.type as type,
-           target.description as description, target.confidence as confidence,
-               target.document_id as document_id, r.confidence as relation_confidence
+               target.description as description, target.confidence as confidence,
+               target.document_id as document_id, r.confidence as relation_confidence,
+               r.description as relation_description,
+               text_chunks[0..3] as source_texts
         ORDER BY r.confidence DESC, target.mention_count DESC
         LIMIT 20
         """
@@ -629,6 +650,10 @@ class ToGService:
 
             entities = []
             for record in result:
+                source_texts = record.get("source_texts", [])
+                # Filter out None values and limit to first 3 non-empty chunks
+                source_texts = [text for text in source_texts if text][:3]
+
                 entities.append(
                     ToGEntity(
                         id=record["id"],
@@ -637,6 +662,7 @@ class ToGService:
                         description=record.get("description"),
                         confidence=record.get("confidence", 1.0),
                         document_id=record.get("document_id"),
+                        source_texts=source_texts,
                     )
                 )
 
@@ -706,28 +732,135 @@ class ToGService:
         logger.debug(f"Sufficiency check result: {sufficiency}")
         return sufficiency
 
+    async def _enrich_answer_with_chunks(
+        self,
+        question: str,
+        entities: List[ToGEntity],
+        top_k: int = 5
+    ) -> List[str]:
+        """
+        Retrieve most relevant TextUnit chunks for final answer enrichment.
+
+        Args:
+            question: User's question
+            entities: All entities explored during ToG reasoning
+            top_k: Number of chunks to retrieve
+
+        Returns:
+            List of text chunks ordered by relevance
+        """
+        if not entities:
+            return []
+
+        entity_names = [e.name for e in entities if e.name]
+
+        if not entity_names:
+            return []
+
+        logger.info(f"Enriching answer with top {top_k} chunks for {len(entity_names)} entities")
+
+        query = """
+        MATCH (e:Entity)<-[:MENTIONS]-(tu:TextUnit)
+        WHERE e.name IN $entity_names
+        WITH tu, count(DISTINCT e) as entity_count, collect(DISTINCT e.name) as mentioned_entities
+        ORDER BY entity_count DESC, tu.start_char ASC
+        RETURN tu.text as text, entity_count, mentioned_entities
+        LIMIT $top_k
+        """
+
+        try:
+            with self.graph_service.get_session() as session:
+                result = session.run(query, entity_names=entity_names, top_k=top_k)
+                chunks = []
+                for record in result:
+                    text = record.get("text")
+                    if text:
+                        chunks.append(text)
+
+                logger.info(f"Retrieved {len(chunks)} enrichment chunks")
+                return chunks
+        except Exception as e:
+            logger.error(f"Error enriching answer with chunks: {e}")
+            return []
+
     async def _generate_final_answer(self, question: str, config: ToGConfig) -> str:
         """
-        Generate final answer based on explored reasoning path.
+        Generate final answer based on explored reasoning path with enriched context.
         """
         logger.info("Generating final answer from reasoning path")
 
         if not self.reasoning_path.steps:
             return "No reasoning path available to generate an answer."
 
-        # Format the reasoning path for the LLM
+        # Collect all entities explored across all steps
+        all_entities = []
+        for step in self.reasoning_path.steps:
+            all_entities.extend(step.entities_explored)
+
+        # Format the reasoning path with entity descriptions and relation details
         path_summary = []
         for step in self.reasoning_path.steps:
-            entities = [e.name for e in step.entities_explored]
-            relations = [
-                f"{r.source_entity.name}--[{r.type}]-->{r.target_entity.name}"
-                for r in step.relations_selected
-            ]
-            path_summary.append(f"Step {step.depth}: Entities {entities}, Relations {relations}")
+            for rel in step.relations_selected:
+                # Include entity descriptions for richer context
+                source_desc = rel.source_entity.description or rel.source_entity.name
+                target_desc = rel.target_entity.description or rel.target_entity.name
+                rel_desc = rel.description or rel.type
 
-        reasoning_text = "; ".join(path_summary)
+                detail = (
+                    f"{rel.source_entity.name} ({source_desc}) "
+                    f"--[{rel.type}: {rel_desc}]--> "
+                    f"{rel.target_entity.name} ({target_desc})"
+                )
+                path_summary.append(detail)
 
-        prompt = TOG_FINAL_ANSWER_PROMPT.format(question=question, reasoning_path=reasoning_text)
+        reasoning_text = "\n".join(path_summary) if path_summary else "No relations found"
+
+        # Enrich with source text chunks from entities
+        entity_context_snippets = []
+        for entity in all_entities:
+            if entity.source_texts:
+                # Take first chunk from each entity
+                entity_context_snippets.append(f"[Context for {entity.name}]: {entity.source_texts[0][:500]}")
+
+        # Additionally retrieve top-k most relevant chunks across all entities
+        enrichment_chunks = await self._enrich_answer_with_chunks(
+            question=question,
+            entities=all_entities,
+            top_k=3  # Get top 3 most relevant chunks
+        )
+
+        # Combine all context
+        all_context_snippets = entity_context_snippets[:3]  # Max 3 entity contexts
+        all_context_snippets.extend([f"[Additional Context]: {chunk[:500]}" for chunk in enrichment_chunks])
+
+        context_text = "\n\n".join(all_context_snippets) if all_context_snippets else "No additional context available"
+
+        # Enhanced prompt with reasoning path + source texts
+        prompt = f"""Given a question, reasoning path with entity details, and source text excerpts from the knowledge graph, generate a comprehensive and detailed answer.
+
+Question: {question}
+
+Reasoning Path (entities and relationships explored):
+{reasoning_text}
+
+Source Text Excerpts:
+{context_text}
+
+Instructions:
+- Provide a clear, comprehensive answer based on BOTH the reasoning path and source text excerpts
+- Include specific facts, details, numbers, dates, and quotes from the source texts
+- Reference entities and relationships from the reasoning path
+- If the information is insufficient, clearly state what is missing
+- Use a professional, informative tone
+
+Return JSON format:
+{{
+    "answer": "Your detailed answer here with specific information from source texts",
+    "confidence": 0.8,
+    "reasoning_summary": "Brief summary of how the answer was derived from graph reasoning and source texts"
+}}
+
+Only return valid JSON, no additional text."""
 
         response = await self.llm_service.generate_text(
             prompt=prompt, temperature=config.reasoning_temp
@@ -824,7 +957,7 @@ class ToGService:
             next_entities = []
             for relation in relations:
                 target_entity = await self._expand_entity_from_relation_safe(
-                    relation, config.document_ids
+                    relation, config.document_ids, question
                 )
                 if target_entity and target_entity not in self.explored_entities:
                     next_entities.append(target_entity)
@@ -918,11 +1051,11 @@ class ToGService:
             return []
 
     async def _expand_entity_from_relation_safe(
-        self, relation: ToGRelation, document_ids: Optional[List[int]]
+        self, relation: ToGRelation, document_ids: Optional[List[int]], question: str = ""
     ) -> Optional[ToGEntity]:
         """Expand entity from relation with error handling."""
         try:
-            return await self._expand_entity_from_relation(relation, document_ids)
+            return await self._expand_entity_from_relation(relation, document_ids, question)
         except Exception as e:
             logger.error(f"Entity expansion failed for relation {relation.type}: {e}")
             return None

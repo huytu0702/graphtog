@@ -53,8 +53,7 @@ class CommunityDetectionService:
                 'entity_graph',
                 'Entity',
                 {
-                    RELATED_TO: {orientation: 'UNDIRECTED'},
-                    MENTIONED_IN: {orientation: 'UNDIRECTED'}
+                    RELATED_TO: {orientation: 'UNDIRECTED'}
                 }
             )
             YIELD graphName, nodeCount, relationshipCount, projectMillis
@@ -345,7 +344,7 @@ class CommunityDetectionService:
             query = """
             MATCH (source:Entity {name: $source})-[r1:IN_COMMUNITY]->(c:Community)
             MATCH (target:Entity {name: $target})-[r2:IN_COMMUNITY]->(c)
-            WITH source, target, c, [r in relationships(source, target) WHERE type(r) IN ['RELATED_TO', 'MENTIONED_IN']] AS paths
+            WITH source, target, c, [r in relationships(source, target) WHERE type(r) = 'RELATED_TO'] AS paths
             RETURN
                 c.id AS community_id,
                 source.name AS source_entity,
@@ -370,7 +369,7 @@ class CommunityDetectionService:
             # If not in same community, find cross-community path
             cross_query = """
             MATCH path = (source:Entity {name: $source})-[*1..{max_depth}]-(target:Entity {name: $target})
-            WHERE all(rel in relationships(path) WHERE type(rel) IN ['RELATED_TO', 'MENTIONED_IN', 'PART_OF'])
+            WHERE all(rel in relationships(path) WHERE type(rel) = 'RELATED_TO')
             WITH [n in nodes(path) | n.name] AS entity_path,
                  length(path) AS path_length
             RETURN entity_path, path_length
@@ -470,7 +469,7 @@ class CommunityDetectionService:
             WHERE e.id IN $entity_ids
 
             // Get 1-hop neighbors
-            OPTIONAL MATCH (e)-[r:RELATED_TO|MENTIONED_IN]-(neighbor:Entity)
+            OPTIONAL MATCH (e)-[r:RELATED_TO]-(neighbor:Entity)
 
             WITH COLLECT(DISTINCT e.id) + COLLECT(DISTINCT neighbor.id) AS all_entity_ids
             UNWIND all_entity_ids AS entity_id
@@ -504,7 +503,7 @@ class CommunityDetectionService:
             CALL gds.graph.project.cypher(
                 '{subgraph_name}',
                 'MATCH (e:Entity) WHERE e.id IN $entity_ids RETURN id(e) AS id',
-                'MATCH (e1:Entity)-[r:RELATED_TO|MENTIONED_IN]-(e2:Entity)
+                'MATCH (e1:Entity)-[r:RELATED_TO]-(e2:Entity)
                  WHERE e1.id IN $entity_ids AND e2.id IN $entity_ids
                  RETURN id(e1) AS source, id(e2) AS target'
             )

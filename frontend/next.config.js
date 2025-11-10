@@ -6,6 +6,7 @@ const nextConfig = {
       beforeFiles: [
         // Forward backend API routes to FastAPI backend
         // Exclude /api/auth/* which is handled by NextAuth.js
+        // Exclude /api/tog/* which uses custom route handlers with extended timeout
         {
           source: '/api/documents/:path*',
           destination: 'http://localhost:8000/api/documents/:path*',
@@ -13,10 +14,6 @@ const nextConfig = {
         {
           source: '/api/queries/:path*',
           destination: 'http://localhost:8000/api/queries/:path*',
-        },
-        {
-          source: '/api/tog/:path*',
-          destination: 'http://localhost:8000/api/tog/:path*',
         },
         {
           source: '/api/communities/:path*',

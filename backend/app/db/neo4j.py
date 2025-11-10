@@ -28,6 +28,8 @@ class Neo4jConnection:
             self._driver = GraphDatabase.driver(
                 settings.NEO4J_URI,
                 auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+                max_connection_pool_size=100,  # Increased from default 100 to handle concurrent requests
+                connection_acquisition_timeout=120.0,  # Increased from 60s to 120s
             )
 
     def get_session(self) -> Neo4jSession:
