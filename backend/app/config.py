@@ -76,6 +76,26 @@ class Settings:
     LANGSMITH_API_KEY: Optional[str] = os.getenv("LANGSMITH_API_KEY")
     LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "graphtog-project")
 
+    # ========== GraphRAG INDEXING CONFIGURATION ==========
+    # Number of gleaning passes (0=single pass, 1+=iterative gleaning, recommended: 1)
+    MAX_GLEANINGS: int = int(os.getenv("MAX_GLEANINGS", "1"))
+    # Entity types to extract (None = use defaults from prompt.py)
+    ENTITY_TYPES: Optional[list] = None
+    # Recommended chunk size for gleaning (larger chunks = more entities per pass)
+    CHUNK_SIZE_TOKENS: int = int(os.getenv("CHUNK_SIZE_TOKENS", "1200"))
+    # Enable description summarization for multi-mention entities
+    ENABLE_DESCRIPTION_SUMMARIZATION: bool = (
+        os.getenv("ENABLE_DESCRIPTION_SUMMARIZATION", "True").lower() == "true"
+    )
+    # Max length for consolidated entity descriptions (characters)
+    DESCRIPTION_MAX_LENGTH: int = int(os.getenv("DESCRIPTION_MAX_LENGTH", "120"))
+    # Extraction delimiters (match prompt.py defaults)
+    TUPLE_DELIMITER: str = os.getenv("TUPLE_DELIMITER", "|||")
+    RECORD_DELIMITER: str = os.getenv("RECORD_DELIMITER", "\n")
+    COMPLETION_DELIMITER: str = os.getenv("COMPLETION_DELIMITER", "<COMPLETE>")
+    # Enable GraphRAG gleaning (can be disabled for backward compatibility)
+    ENABLE_GRAPHRAG_GLEANING: bool = os.getenv("ENABLE_GRAPHRAG_GLEANING", "True").lower() == "true"
+
     # ========== LOGGING ==========
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 

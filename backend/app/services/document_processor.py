@@ -276,35 +276,162 @@ async def process_document_with_graph(
         except Exception as embed_error:
             logger.error("Embedding storage failed: %s", embed_error)
 
-        # Step 7: Batch extract entities from all chunks
-        logger.info("Step 7: Extracting entities from chunks...")
-        entity_results = await llm_service.batch_extract_entities(chunk_data)
+        # Step 7: Extract entities AND relationships with GraphRAG gleaning (replaces old 7 and 8)
+        logger.info("Step 7: Extracting entities and relationships with GraphRAG gleaning...")
+        if update_callback:
+            await update_callback("graph_extraction", 50)
 
-        all_entities_by_chunk = {}
-        for result in entity_results:
-            if result["status"] == "success":
-                chunk_id = result["chunk_id"]
-                all_entities_by_chunk[chunk_id] = result["entities"]
-                results["entities_extracted"] += len(result["entities"])
+        # Use gleaning-based extraction if enabled, otherwise fall back to old batch method
+        if settings.ENABLE_GRAPHRAG_GLEANING:
+            logger.info("Using GraphRAG gleaning-based extraction...")
+            
+            extraction_config = {
+                "entity_types": settings.ENTITY_TYPES or None,
+                "max_gleanings": settings.MAX_GLEANINGS,
+            }
 
-                # Create entity nodes in graph
-                for entity in result["entities"]:
-                    entity_id = graph_service.create_or_merge_entity(
-                        name=entity.get("name", ""),
-                        entity_type=entity.get("type", "OTHER"),
-                        description=entity.get("description", ""),
-                        confidence=entity.get("confidence", 0.8),
-                    )
+            all_extractions = []
+            for chunk_text, chunk_id in chunk_data:
+                extraction_result = await llm_service.extract_graph_with_gleaning(
+                    text=chunk_text,
+                    chunk_id=chunk_id,
+                    **extraction_config,
+                )
+                all_extractions.append(extraction_result)
 
-                    if entity_id:
-                        # Link entity to text unit
-                        graph_service.create_mention_relationship(
-                            entity_id=entity_id,
-                            textunit_id=chunk_id,
+                if extraction_result["status"] == "success":
+                    results["entities_extracted"] += len(extraction_result["entities"])
+                    results["relationships_extracted"] += len(extraction_result["relationships"])
+
+                    # Create entity nodes
+                    for entity in extraction_result["entities"]:
+                        entity_id = graph_service.create_or_merge_entity(
+                            name=entity.get("name", ""),
+                            entity_type=entity.get("type", "OTHER"),
+                            description=entity.get("description", ""),
+                            confidence=entity.get("confidence", 0.8),
+                        )
+                        if entity_id:
+                            graph_service.create_mention_relationship(
+                                entity_id=entity_id,
+                                textunit_id=chunk_id,
+                            )
+
+                    # Create relationship edges
+                    for rel in extraction_result["relationships"]:
+                        source_entity = graph_service.find_entity_by_name(rel["source"])
+                        target_entity = graph_service.find_entity_by_name(rel["target"])
+
+                        if source_entity and target_entity:
+                            graph_service.create_relationship(
+                                source_entity_id=source_entity["id"],
+                                target_entity_id=target_entity["id"],
+                                relationship_type=rel.get("type", "RELATED_TO"),
+                                description=rel.get("description", ""),
+                                confidence=rel.get("strength", 5) / 10.0,
+                            )
+
+            logger.info(
+                f"Extracted {results['entities_extracted']} entities and "
+                f"{results['relationships_extracted']} relationships with gleaning"
+            )
+        else:
+            logger.info("Using traditional separate entity and relationship extraction...")
+            
+            # Legacy: separate extraction
+            entity_results = await llm_service.batch_extract_entities(chunk_data)
+
+            all_entities_by_chunk = {}
+            for result in entity_results:
+                if result["status"] == "success":
+                    chunk_id = result["chunk_id"]
+                    all_entities_by_chunk[chunk_id] = result["entities"]
+                    results["entities_extracted"] += len(result["entities"])
+
+                    # Create entity nodes in graph
+                    for entity in result["entities"]:
+                        entity_id = graph_service.create_or_merge_entity(
+                            name=entity.get("name", ""),
+                            entity_type=entity.get("type", "OTHER"),
+                            description=entity.get("description", ""),
+                            confidence=entity.get("confidence", 0.8),
                         )
 
-        # Step 7.5: Entity resolution and deduplication (optional)
-        if settings.ENABLE_ENTITY_RESOLUTION:
+                        if entity_id:
+                            # Link entity to text unit
+                            graph_service.create_mention_relationship(
+                                entity_id=entity_id,
+                                textunit_id=chunk_id,
+                            )
+
+            # Step 8: Extract relationships (legacy path)
+            chunk_with_entities = [
+                (chunk_text, all_entities_by_chunk.get(chunk_id, []), chunk_id)
+                for chunk_text, chunk_id in chunk_data
+            ]
+
+            rel_results = await llm_service.batch_extract_relationships(chunk_with_entities)
+
+            for result in rel_results:
+                if result["status"] == "success":
+                    results["relationships_extracted"] += len(result["relationships"])
+                    for relationship in result["relationships"]:
+                        source_name = relationship.get("source", "")
+                        target_name = relationship.get("target", "")
+
+                        # Find entity IDs
+                        source_entity = graph_service.find_entity_by_name(source_name)
+                        target_entity = graph_service.find_entity_by_name(target_name)
+
+                        if source_entity and target_entity:
+                            rel_type = relationship.get("type", "RELATED_TO")
+                            graph_service.create_relationship(
+                                source_entity_id=source_entity["id"],
+                                target_entity_id=target_entity["id"],
+                                relationship_type=rel_type,
+                                description=relationship.get("description", ""),
+                                confidence=relationship.get("confidence", 0.8),
+                            )
+
+        # Step 7.5: Description summarization (new gleaning enhancement)
+        if settings.ENABLE_GRAPHRAG_GLEANING and settings.ENABLE_DESCRIPTION_SUMMARIZATION:
+            logger.info("Step 7.5: Consolidating entity descriptions across chunks...")
+            if update_callback:
+                await update_callback("entity_consolidation", 55)
+
+            try:
+                # Get all entities from graph
+                all_graph_entities = graph_service.get_all_entities_for_document(document_id)
+
+                # Group by (name, type)
+                entity_groups = {}
+                for entity in all_graph_entities:
+                    key = (entity["name"].upper(), entity["type"].upper())
+                    if key not in entity_groups:
+                        entity_groups[key] = []
+                    entity_groups[key].append(entity)
+
+                # Summarize descriptions for entities with multiple mentions
+                for key, entities in entity_groups.items():
+                    if len(entities) > 1:
+                        descriptions = [e["description"] for e in entities if e.get("description")]
+                        if len(descriptions) > 1:
+                            summarized = await llm_service.summarize_entity_descriptions(
+                                entity_name=entities[0]["name"],
+                                descriptions=descriptions,
+                                max_length=settings.DESCRIPTION_MAX_LENGTH,
+                            )
+                            # Update entity in graph with summarized description
+                            graph_service.update_entity_description(
+                                entity_id=entities[0]["id"],
+                                description=summarized,
+                            )
+                            logger.info(f"Consolidated description for entity: {entities[0]['name']}")
+                            
+            except Exception as summarization_error:
+                logger.warning(f"Description summarization failed (continuing anyway): {summarization_error}")
+
+        elif settings.ENABLE_ENTITY_RESOLUTION:
             logger.info("Step 7.5: Performing entity resolution and deduplication...")
             if update_callback:
                 await update_callback("entity_resolution", 65)
@@ -383,39 +510,6 @@ async def process_document_with_graph(
                 results["entities_resolved_with_llm"] = 0
         else:
             logger.info("Step 7.5: Entity resolution disabled (skipping)")
-
-        # Step 8: Extract relationships
-        logger.info("Step 8: Extracting relationships...")
-        if update_callback:
-            await update_callback("relationship_extraction", 70)
-
-        chunk_with_entities = [
-            (chunk_text, all_entities_by_chunk.get(chunk_id, []), chunk_id)
-            for chunk_text, chunk_id in chunk_data
-        ]
-
-        rel_results = await llm_service.batch_extract_relationships(chunk_with_entities)
-
-        for result in rel_results:
-            if result["status"] == "success":
-                for relationship in result["relationships"]:
-                    source_name = relationship.get("source", "")
-                    target_name = relationship.get("target", "")
-
-                    # Find entity IDs
-                    source_entity = graph_service.find_entity_by_name(source_name)
-                    target_entity = graph_service.find_entity_by_name(target_name)
-
-                    if source_entity and target_entity:
-                        rel_type = relationship.get("type", "RELATED_TO")
-                        graph_service.create_relationship(
-                            source_entity_id=source_entity["id"],
-                            target_entity_id=target_entity["id"],
-                            relationship_type=rel_type,
-                            description=relationship.get("description", ""),
-                            confidence=relationship.get("confidence", 0.8),
-                        )
-                        results["relationships_extracted"] += 1
 
         # Step 8.5: Extract claims from chunks with entities
         logger.info("Step 8.5: Extracting claims from chunks...")

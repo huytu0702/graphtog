@@ -15,13 +15,18 @@ from google.api_core import retry
 from app.config import get_settings
 from app.services.prompt import (
     DEFAULT_COMPLETION_DELIMITER,
+    DEFAULT_ENTITY_TYPES,
     DEFAULT_RECORD_DELIMITER,
     DEFAULT_TUPLE_DELIMITER,
     build_claims_extraction_prompt,
     build_community_summary_prompt,
     build_contextual_answer_prompt,
+    build_description_summarization_prompt,
     build_entity_extraction_prompt,
     build_graph_community_summary_prompt,
+    build_graph_extraction_continue_prompt,
+    build_graph_extraction_loop_prompt,
+    build_graph_extraction_prompt,
     build_map_reduce_batch_summary_prompt,
     build_map_reduce_final_synthesis_prompt,
     build_query_classification_prompt,
@@ -921,6 +926,278 @@ class LLMService:
                 "confidence_score": "0.0",
                 "limitations": str(e),
             }
+
+    # =========================================================================
+    # Phase 1: GraphRAG-style extraction with gleaning loop
+    # =========================================================================
+
+    async def extract_graph_with_gleaning(
+        self,
+        text: str,
+        chunk_id: str,
+        entity_types: Optional[List[str]] = None,
+        max_gleanings: int = 1,
+    ) -> Dict[str, Any]:
+        """
+        Extract entities and relationships using GraphRAG multi-pass gleaning.
+
+        Performs an initial extraction, then iteratively refines by asking the LLM
+        for missed entities/relationships and checking if more gleaning is needed.
+
+        Args:
+            text: Text to extract from
+            chunk_id: Identifier for the chunk
+            entity_types: Entity types to extract (default: DEFAULT_ENTITY_TYPES)
+            max_gleanings: Maximum number of gleaning passes (0 = single pass)
+
+        Returns:
+            Dict with entities, relationships, num_gleanings, and status
+        """
+        if entity_types is None:
+            entity_types = list(DEFAULT_ENTITY_TYPES)
+
+        all_entities = []
+        all_relationships = []
+        extraction_history = []
+
+        try:
+            # Initial extraction
+            logger.info(f"Chunk {chunk_id}: Performing initial graph extraction...")
+            initial_prompt = build_graph_extraction_prompt(
+                text=text,
+                entity_types=entity_types,
+                tuple_delimiter=DEFAULT_TUPLE_DELIMITER,
+                record_delimiter=DEFAULT_RECORD_DELIMITER,
+                completion_delimiter=DEFAULT_COMPLETION_DELIMITER,
+            )
+
+            response = await self.generate_text(initial_prompt, temperature=0.0)
+            entities, relationships = self._parse_graph_extraction_response(response)
+            all_entities.extend(entities)
+            all_relationships.extend(relationships)
+            extraction_history.append(response)
+
+            logger.info(f"Chunk {chunk_id}: Initial extraction found {len(entities)} entities, {len(relationships)} relationships")
+
+            # Gleaning loop
+            for glean_iteration in range(max_gleanings):
+                logger.info(f"Chunk {chunk_id}: Gleaning pass {glean_iteration + 1}/{max_gleanings}")
+
+                # Continue prompt - ask for missed entities/relationships
+                continue_prompt = build_graph_extraction_continue_prompt()
+                full_context = (
+                    f"{text}\n\n"
+                    f"Previous extractions:\n"
+                    f"{chr(10).join(extraction_history)}\n\n"
+                    f"{continue_prompt}"
+                )
+
+                glean_response = await self.generate_text(full_context, temperature=0.0)
+                new_entities, new_relationships = self._parse_graph_extraction_response(glean_response)
+
+                if new_entities or new_relationships:
+                    all_entities.extend(new_entities)
+                    all_relationships.extend(new_relationships)
+                    extraction_history.append(glean_response)
+                    logger.info(
+                        f"Chunk {chunk_id}: Gleaning pass {glean_iteration + 1} found "
+                        f"{len(new_entities)} new entities, {len(new_relationships)} new relationships"
+                    )
+                else:
+                    logger.info(f"Chunk {chunk_id}: Gleaning pass {glean_iteration + 1} found no new entities/relationships")
+
+                # Loop decision - should we continue?
+                if glean_iteration < max_gleanings - 1:
+                    loop_prompt = build_graph_extraction_loop_prompt()
+                    loop_context = (
+                        f"{text}\n\n"
+                        f"All extractions so far:\n"
+                        f"{chr(10).join(extraction_history)}\n\n"
+                        f"{loop_prompt}"
+                    )
+
+                    loop_response = await self.generate_text(loop_context, temperature=0.0)
+                    should_continue = "Y" in loop_response.upper() or "YES" in loop_response.upper()
+
+                    if not should_continue:
+                        logger.info(f"Chunk {chunk_id}: LLM determined extraction is complete, stopping gleaning")
+                        break
+                    else:
+                        logger.info(f"Chunk {chunk_id}: LLM determined more gleaning is needed, continuing...")
+
+            # Deduplicate entities and relationships
+            unique_entities = self._deduplicate_entities(all_entities)
+            unique_relationships = self._deduplicate_relationships(all_relationships)
+
+            logger.info(
+                f"Chunk {chunk_id}: Deduplication reduced entities from {len(all_entities)} to {len(unique_entities)}, "
+                f"relationships from {len(all_relationships)} to {len(unique_relationships)}"
+            )
+
+            return {
+                "chunk_id": chunk_id,
+                "entities": unique_entities,
+                "relationships": unique_relationships,
+                "num_gleanings": len(extraction_history) - 1,
+                "status": "success",
+            }
+
+        except Exception as e:
+            logger.error(f"Graph extraction with gleaning failed for chunk {chunk_id}: {e}")
+            return {
+                "chunk_id": chunk_id,
+                "entities": [],
+                "relationships": [],
+                "num_gleanings": 0,
+                "status": "error",
+                "error": str(e),
+            }
+
+    # =========================================================================
+    # Phase 2: Entity and Relationship Deduplication
+    # =========================================================================
+
+    def _deduplicate_entities(self, entities: List[Dict]) -> List[Dict]:
+        """
+        Merge duplicate entities by (name, type) and consolidate descriptions.
+
+        Entities with the same name and type are merged, with descriptions combined.
+        Confidence scores are averaged.
+
+        Args:
+            entities: List of entity dictionaries from extraction
+
+        Returns:
+            List of deduplicated entity dictionaries
+        """
+        entity_map = {}
+
+        for entity in entities:
+            key = (entity.get("name", "").upper(), entity.get("type", "").upper())
+            if key not in entity_map:
+                entity_map[key] = {
+                    "name": entity.get("name", ""),
+                    "type": entity.get("type", ""),
+                    "descriptions": [entity.get("description", "")],
+                    "confidence": entity.get("confidence", 0.8),
+                    "mention_count": 1,
+                }
+            else:
+                entity_map[key]["descriptions"].append(entity.get("description", ""))
+                entity_map[key]["confidence"] = (
+                    entity_map[key]["confidence"] + entity.get("confidence", 0.8)
+                ) / 2
+                entity_map[key]["mention_count"] += 1
+
+        # Convert back to list, joining descriptions
+        result = []
+        for key, data in entity_map.items():
+            unique_descriptions = list(set(d for d in data["descriptions"] if d.strip()))
+            result.append({
+                "name": data["name"],
+                "type": data["type"],
+                "description": " | ".join(unique_descriptions) if unique_descriptions else "",
+                "confidence": round(data["confidence"], 2),
+                "mention_count": data["mention_count"],
+            })
+
+        return result
+
+    def _deduplicate_relationships(self, relationships: List[Dict]) -> List[Dict]:
+        """
+        Merge duplicate relationships by (source, target, type).
+
+        Relationships between the same entities are consolidated.
+        Descriptions are merged, strength is maximized, and weight reflects mention frequency.
+
+        Args:
+            relationships: List of relationship dictionaries from extraction
+
+        Returns:
+            List of deduplicated relationship dictionaries
+        """
+        rel_map = {}
+
+        for rel in relationships:
+            key = (
+                rel.get("source", "").upper(),
+                rel.get("target", "").upper(),
+                rel.get("type", "RELATED_TO").upper(),
+            )
+            if key not in rel_map:
+                rel_map[key] = {
+                    "source": rel.get("source", ""),
+                    "target": rel.get("target", ""),
+                    "type": rel.get("type", "RELATED_TO"),
+                    "descriptions": [rel.get("description", "")],
+                    "strength": rel.get("strength", 5),
+                    "confidence": rel.get("confidence", 0.5),
+                    "count": 1,
+                }
+            else:
+                rel_map[key]["descriptions"].append(rel.get("description", ""))
+                rel_map[key]["strength"] = max(rel_map[key]["strength"], rel.get("strength", 5))
+                rel_map[key]["confidence"] = max(rel_map[key]["confidence"], rel.get("confidence", 0.5))
+                rel_map[key]["count"] += 1
+
+        result = []
+        for key, data in rel_map.items():
+            unique_descriptions = list(set(d for d in data["descriptions"] if d.strip()))
+            result.append({
+                "source": data["source"],
+                "target": data["target"],
+                "type": data["type"],
+                "description": " | ".join(unique_descriptions) if unique_descriptions else "",
+                "strength": data["strength"],
+                "confidence": round(data["confidence"], 2),
+                "weight": data["count"],
+            })
+
+        return result
+
+    # =========================================================================
+    # Phase 3: Entity Description Summarization
+    # =========================================================================
+
+    async def summarize_entity_descriptions(
+        self,
+        entity_name: str,
+        descriptions: List[str],
+        max_length: int = 120,
+    ) -> str:
+        """
+        Summarize multiple entity descriptions into a single coherent description.
+
+        If only one description exists, returns it as-is.
+        For multiple descriptions, uses an LLM to synthesize them.
+
+        Args:
+            entity_name: Name of the entity
+            descriptions: List of descriptions to summarize
+            max_length: Maximum length for output description
+
+        Returns:
+            Consolidated description string
+        """
+        if not descriptions:
+            return ""
+
+        if len(descriptions) == 1:
+            return descriptions[0]
+
+        try:
+            prompt = build_description_summarization_prompt(
+                entity_name=entity_name,
+                description_list="\n".join(f"- {desc}" for desc in descriptions if desc.strip()),
+                max_length=max_length,
+            )
+
+            response = await self.generate_text(prompt, temperature=0.3)
+            return response.strip()
+
+        except Exception as e:
+            logger.warning(f"Description summarization failed for {entity_name}: {e}. Using first description.")
+            return descriptions[0] if descriptions else ""
 
 
 # Export singleton instance

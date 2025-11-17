@@ -1294,6 +1294,127 @@ class GraphService:
             self.session.close()
             self.session = None
 
+    # =========================================================================
+    # Phase 6: Cross-TextUnit Deduplication Support
+    # =========================================================================
+
+    def get_all_entities_for_document(
+        self,
+        document_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all entities for a document with multiple mentions consolidated.
+
+        Groups entities by (name, type) to enable cross-chunk deduplication
+        and description summarization.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            List of entity dictionaries with mention info
+        """
+        try:
+            session = self.get_session()
+
+            query = """
+            MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)
+            <-[:MENTIONED_IN]-(e:Entity)
+            RETURN
+                e.id as id,
+                e.name as name,
+                e.type as type,
+                e.description as description,
+                e.confidence as confidence,
+                COUNT(t) as mention_count
+            ORDER BY e.name, e.type
+            """
+
+            result = session.run(query, document_id=document_id)
+            entities = [dict(record) for record in result]
+            return entities
+
+        except Exception as e:
+            logger.error(f"Error getting all entities for document {document_id}: {e}")
+            return []
+
+    def update_entity_description(
+        self,
+        entity_id: str,
+        description: str,
+    ) -> bool:
+        """
+        Update the description of an entity.
+
+        Used after description summarization to consolidate descriptions
+        from multiple mentions.
+
+        Args:
+            entity_id: Entity ID
+            description: New description text
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            session = self.get_session()
+
+            query = """
+            MATCH (e:Entity {id: $entity_id})
+            SET e.description = $description,
+                e.updated_at = datetime()
+            RETURN e
+            """
+
+            result = session.run(query, entity_id=entity_id, description=description)
+            return result.single() is not None
+
+        except Exception as e:
+            logger.error(f"Error updating entity description for {entity_id}: {e}")
+            return False
+
+    def get_entities_by_name_and_type_group(
+        self,
+        document_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get entities grouped by (name, type) for deduplication.
+
+        Returns entities grouped so we can identify which ones have multiple mentions
+        and need description consolidation.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            List of dicts with entity groups and their descriptions
+        """
+        try:
+            session = self.get_session()
+
+            query = """
+            MATCH (d:Document {id: $document_id})<-[:PART_OF]-(t:TextUnit)
+            <-[:MENTIONED_IN]-(e:Entity)
+            RETURN
+                e.id as id,
+                e.name as name,
+                e.type as type,
+                COLLECT(DISTINCT e.description) as descriptions,
+                e.confidence as confidence,
+                COUNT(DISTINCT t) as mention_count
+            GROUP BY e.name, e.type, e.id, e.confidence
+            HAVING COUNT(DISTINCT t) > 1
+            ORDER BY mention_count DESC
+            """
+
+            result = session.run(query, document_id=document_id)
+            entities = [dict(record) for record in result]
+            return entities
+
+        except Exception as e:
+            logger.error(f"Error getting entities by group for document {document_id}: {e}")
+            return []
+
 
 # Export singleton instance
 graph_service = GraphService()
